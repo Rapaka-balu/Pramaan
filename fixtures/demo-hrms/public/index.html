@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en-IN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Demo HRMS</title>
+  <link rel="stylesheet" href="/styles.css">
+  <!-- demo-config -->
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header id="site-header" hidden>
+    <span id="brand">Demo HRMS</span>
+    <nav aria-label="Main">
+      <ul>
+        <li><a href="/dashboard" data-testid="nav-dashboard">Dashboard</a></li>
+        <li><a href="/leaves" data-testid="nav-leaves">My leaves</a></li>
+        <li data-requires-role="manager admin"><a href="/approvals" data-testid="nav-approvals">Approvals</a></li>
+        <li data-requires-role="admin"><a href="/employees">Employees</a></li>
+        <li><a href="/attendance">Attendance</a></li>
+      </ul>
+    </nav>
+    <span id="current-user" data-testid="current-user"></span>
+    <button type="button" id="logout" data-testid="logout-btn">Logout</button>
+  </header>
+
+  <main id="main" tabindex="-1"></main>
+
+  <!-- ===================== View templates (cloned by app.js) ===================== -->
+
+  <template id="tpl-login">
+    <section aria-labelledby="login-heading" class="card narrow">
+      <h1 id="login-heading">Sign in</h1>
+      <form id="login-form" novalidate>
+        <label for="login-tenant">Tenant code</label>
+        <input id="login-tenant" name="tenant" type="text" autocomplete="organization" required data-testid="login-tenant">
+
+        <label for="login-email">Email</label>
+        <input id="login-email" name="email" type="email" autocomplete="username" required placeholder="name@company.com">
+
+        <label for="login-password">Password</label>
+        <input id="login-password" name="password" type="password" autocomplete="current-password" required data-testid="login-password">
+
+        <p id="login-error" role="alert" data-testid="login-error" hidden></p>
+        <button type="submit" data-testid="login-submit">Sign in</button>
+      </form>
+    </section>
+  </template>
+
+  <template id="tpl-dashboard">
+    <section aria-labelledby="dashboard-heading">
+      <h1 id="dashboard-heading">Dashboard</h1>
+      <div class="card" aria-labelledby="balance-heading">
+        <h2 id="balance-heading">Leave balance</h2>
+        <p id="balance-text" data-testid="balance-text">Leave balance: <span id="balance-days" data-testid="balance-days">…</span> days</p>
+        <p id="balance-detail" data-testid="balance-detail"></p>
+        <div id="balance-error" hidden>
+          <p role="alert">Could not load your leave balance.</p>
+          <button type="button" id="balance-retry">Retry</button>
+        </div>
+      </div>
+    </section>
+  </template>
+
+  <template id="tpl-leaves">
+    <section aria-labelledby="leaves-heading">
+      <h1 id="leaves-heading">My leaves</h1>
+      <p id="flash" role="status" data-testid="flash"></p>
+      <div class="toolbar">
+        <a href="/leaves/apply" data-testid="apply-leave-link">Apply leave</a>
+        <button type="button" id="export-csv" data-testid="export-csv-btn">Export CSV</button>
+      </div>
+      <table data-testid="leaves-table">
+        <caption>Your leave requests</caption>
+        <thead>
+          <tr><th scope="col">From</th><th scope="col">To</th><th scope="col">Days</th><th scope="col">Status</th><th scope="col">Reason</th><th scope="col">Actions</th></tr>
+        </thead>
+        <tbody id="leaves-body"></tbody>
+      </table>
+      <p id="leaves-empty" hidden>You have no leave requests yet.</p>
+    </section>
+  </template>
+
+  <template id="tpl-leave-row">
+    <tr data-testid="leave-row">
+      <td data-field="from"></td>
+      <td data-field="to"></td>
+      <td data-field="days"></td>
+      <td data-field="status"></td>
+      <td data-field="reason"></td>
+      <td>
+        <a data-field="view">View</a>
+        <button type="button" data-action="cancel" data-testid="cancel-leave-btn">Cancel</button>
+      </td>
+    </tr>
+  </template>
+
+  <template id="tpl-apply">
+    <section aria-labelledby="apply-heading" class="card narrow">
+      <h1 id="apply-heading">Apply leave</h1>
+      <form id="apply-form" novalidate>
+        <label for="leave-from">From</label>
+        <input id="leave-from" name="from" type="date" required data-testid="leave-from" aria-describedby="err-from">
+        <p id="err-from" class="field-error" data-error-for="from"></p>
+
+        <label for="leave-to">To</label>
+        <input id="leave-to" name="to" type="date" required aria-describedby="err-to">
+        <p id="err-to" class="field-error" data-error-for="to"></p>
+
+        <label for="leave-days">Days</label>
+        <input id="leave-days" name="days" type="number" step="0.5" min="0.5" required data-testid="leave-days" aria-describedby="err-days">
+        <p id="err-days" class="field-error" data-error-for="days"></p>
+
+        <div class="checkbox">
+          <input id="leave-half-day" name="halfDay" type="checkbox">
+          <label for="leave-half-day">Half day</label>
+        </div>
+
+        <label for="leave-reason">Reason</label>
+        <textarea id="leave-reason" name="reason" rows="3" maxlength="500" required placeholder="Reason for leave" data-testid="leave-reason" aria-describedby="err-reason"></textarea>
+        <p id="err-reason" class="field-error" data-error-for="reason"></p>
+
+        <p id="apply-error" role="alert" data-testid="apply-error" hidden></p>
+        <div class="toolbar">
+          <button type="submit" name="intent" value="submit" data-testid="apply-leave-btn">Apply leave</button>
+          <button type="submit" name="intent" value="draft">Save as draft</button>
+        </div>
+      </form>
+    </section>
+  </template>
+
+  <template id="tpl-leave-detail">
+    <section aria-labelledby="detail-heading" class="card narrow">
+      <h1 id="detail-heading">Leave request</h1>
+      <p id="detail-flash" role="status"></p>
+      <dl data-testid="leave-detail">
+        <dt>Employee</dt><dd data-field="employeeName"></dd>
+        <dt>From</dt><dd data-field="from"></dd>
+        <dt>To</dt><dd data-field="to"></dd>
+        <dt>Days</dt><dd data-field="days"></dd>
+        <dt>Status</dt><dd data-field="status" data-testid="leave-status"></dd>
+        <dt>Reason</dt><dd data-field="reason"></dd>
+      </dl>
+      <p id="detail-error" role="alert" hidden></p>
+      <div class="toolbar">
+        <button type="button" data-action="submit" data-testid="submit-leave-btn" hidden>Submit</button>
+        <button type="button" data-action="approve" data-testid="detail-approve-btn" hidden>Approve</button>
+        <button type="button" data-action="reject" hidden>Reject</button>
+        <button type="button" data-action="cancel" hidden>Cancel leave</button>
+        <a href="/leaves">Back to my leaves</a>
+      </div>
+    </section>
+  </template>
+
+  <template id="tpl-approvals">
+    <section aria-labelledby="approvals-heading">
+      <h1 id="approvals-heading">Approvals</h1>
+      <p id="flash" role="status" data-testid="flash"></p>
+      <table data-testid="approvals-table">
+        <caption>Leave requests waiting for your decision</caption>
+        <thead>
+          <tr><th scope="col">Employee</th><th scope="col">From</th><th scope="col">To</th><th scope="col">Days</th><th scope="col">Reason</th><th scope="col">Actions</th></tr>
+        </thead>
+        <tbody id="approvals-body"></tbody>
+      </table>
+      <p id="approvals-empty" hidden>No pending approvals.</p>
+    </section>
+  </template>
+
+  <template id="tpl-approval-row">
+    <tr data-testid="approval-row">
+      <td data-field="employeeName"></td>
+      <td data-field="from"></td>
+      <td data-field="to"></td>
+      <td data-field="days"></td>
+      <td data-field="reason"></td>
+      <td>
+        <button type="button" data-action="approve" data-testid="approve-btn">Approve</button>
+        <button type="button" data-action="reject">Reject</button>
+      </td>
+    </tr>
+  </template>
+
+  <template id="tpl-employees">
+    <section aria-labelledby="employees-heading">
+      <h1 id="employees-heading">Employees</h1>
+      <table data-testid="employees-table">
+        <caption>People in your organisation</caption>
+        <thead>
+          <tr><th scope="col">Name</th><th scope="col">Email</th><th scope="col">Role</th></tr>
+        </thead>
+        <tbody id="employees-body"></tbody>
+      </table>
+    </section>
+  </template>
+
+  <template id="tpl-employee-row">
+    <tr data-testid="employee-row">
+      <td data-field="name"></td>
+      <td data-field="email"></td>
+      <td data-field="role"></td>
+    </tr>
+  </template>
+
+  <template id="tpl-attendance">
+    <section aria-labelledby="attendance-heading">
+      <h1 id="attendance-heading">Attendance</h1>
+      <p id="flash" role="status" data-testid="flash"></p>
+      <div class="toolbar">
+        <button type="button" id="punch-in" data-testid="punch-in-btn">Punch in</button>
+        <button type="button" id="punch-out">Punch out</button>
+      </div>
+      <table data-testid="attendance-table">
+        <caption>Your attendance</caption>
+        <thead>
+          <tr><th scope="col">Date</th><th scope="col">Punch in</th><th scope="col">Punch out</th></tr>
+        </thead>
+        <tbody id="attendance-body"></tbody>
+      </table>
+    </section>
+  </template>
+
+  <template id="tpl-attendance-row">
+    <tr data-testid="attendance-row">
+      <td data-field="date"></td>
+      <td data-field="punchIn"></td>
+      <td data-field="punchOut"></td>
+    </tr>
+  </template>
+
+  <template id="tpl-message">
+    <section aria-labelledby="message-heading" class="card narrow">
+      <h1 id="message-heading" data-field="title"></h1>
+      <p data-field="text"></p>
+      <a href="/dashboard">Go to dashboard</a>
+    </section>
+  </template>
+</body>
+</html>

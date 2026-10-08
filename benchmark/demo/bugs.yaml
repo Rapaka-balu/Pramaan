@@ -1,0 +1,96 @@
+# Seeded bugs in the local demo HRMS (fixtures/demo-hrms). See PRAMAAN_BUILD_SPEC.md §5.
+# expectedOracle mapping: authz / tenant-isolation -> authz-matrix; Workflow Breaker / Boundary Calculator
+# rows -> charter-candidate (until the lead confirms a rule); confirmed calculation rules -> confirmed-rule;
+# implicit -> implicit; consistency -> consistency. `operations` are the real route templates.
+schemaVersion: 1
+bugs:
+  - id: idor-leave-read
+    category: authz
+    activation: { env: { DEMO_BUGS: idor-leave-read } }
+    expectedOracle: authz-matrix
+    operations: ['GET /api/leaves/{id}']
+    mvp: true
+  - id: employee-admin-endpoint
+    category: authz
+    activation: { env: { DEMO_BUGS: employee-admin-endpoint } }
+    expectedOracle: authz-matrix
+    operations: ['GET /api/employees', 'GET /api/employees/{id}']
+    mvp: true
+  - id: cross-tenant-list
+    category: tenant-isolation
+    activation: { env: { DEMO_BUGS: cross-tenant-list } }
+    expectedOracle: authz-matrix
+    operations: ['GET /api/leaves']
+    mvp: true
+  - id: self-approve
+    category: workflow
+    activation: { env: { DEMO_BUGS: self-approve } }
+    expectedOracle: charter-candidate
+    operations: ['POST /api/leaves/{id}/approve']
+    mvp: true
+  - id: double-approve
+    category: workflow
+    activation: { env: { DEMO_BUGS: double-approve } }
+    expectedOracle: charter-candidate
+    operations: ['POST /api/leaves/{id}/approve', 'GET /api/leave-balance']
+    mvp: true
+  - id: cancel-no-refund
+    category: calculation
+    activation: { env: { DEMO_BUGS: cancel-no-refund } }
+    expectedOracle: confirmed-rule
+    operations: ['POST /api/leaves/{id}/cancel', 'GET /api/leave-balance']
+    mvp: true
+  - id: balance-off-by-one
+    category: calculation
+    activation: { env: { DEMO_BUGS: balance-off-by-one } }
+    expectedOracle: confirmed-rule
+    operations: ['POST /api/leaves/{id}/approve', 'GET /api/leave-balance']
+    mvp: true
+  - id: half-day-rounding
+    category: calculation
+    activation: { env: { DEMO_BUGS: half-day-rounding } }
+    expectedOracle: charter-candidate
+    operations: ['POST /api/leaves', 'POST /api/leaves/{id}/approve', 'GET /api/leave-balance']
+    mvp: true
+  - id: negative-days
+    category: validation
+    activation: { env: { DEMO_BUGS: negative-days } }
+    expectedOracle: charter-candidate
+    operations: ['POST /api/leaves']
+    mvp: true
+  - id: end-before-start
+    category: validation
+    activation: { env: { DEMO_BUGS: end-before-start } }
+    expectedOracle: charter-candidate
+    operations: ['POST /api/leaves']
+    mvp: true
+  - id: ist-midnight
+    category: calculation
+    activation: { env: { DEMO_BUGS: ist-midnight } }
+    expectedOracle: charter-candidate
+    operations: ['POST /api/leaves']
+    mvp: true
+  - id: long-reason-500
+    category: implicit
+    activation: { env: { DEMO_BUGS: long-reason-500 } }
+    expectedOracle: implicit
+    operations: ['POST /api/leaves']
+    mvp: true
+  - id: dashboard-console-error
+    category: implicit
+    activation: { env: { DEMO_BUGS: dashboard-console-error } }
+    expectedOracle: implicit
+    operations: ['GET /dashboard']
+    mvp: true
+  - id: stale-ui-balance
+    category: consistency
+    activation: { env: { DEMO_BUGS: stale-ui-balance } }
+    expectedOracle: consistency
+    operations: ['GET /api/leave-balance', 'POST /api/leaves/{id}/approve']
+    mvp: true
+  - id: csv-export-mismatch
+    category: consistency
+    activation: { env: { DEMO_BUGS: csv-export-mismatch } }
+    expectedOracle: consistency
+    operations: ['GET /api/leaves/export.csv', 'GET /api/leaves']
+    mvp: false

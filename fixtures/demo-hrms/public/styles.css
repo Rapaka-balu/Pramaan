@@ -1,0 +1,69 @@
+/* Demo HRMS: minimal styling only. Semantics live in HTML roles, labels and data-testid, never in classes. */
+:root {
+  --fg: #1d2330;
+  --muted: #5b6475;
+  --bg: #f5f6f8;
+  --card: #ffffff;
+  --accent: #2554c7;
+  --danger: #b42318;
+  --border: #d9dde5;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+body { margin: 0; line-height: 1.5; }
+
+.skip-link { position: absolute; left: -999px; }
+.skip-link:focus { left: 8px; top: 8px; background: var(--card); padding: 4px 8px; }
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 24px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+header[hidden] { display: none; }
+#brand { font-weight: 700; }
+nav ul { display: flex; gap: 12px; list-style: none; margin: 0; padding: 0; }
+nav li[hidden] { display: none; }
+#current-user { margin-left: auto; color: var(--muted); font-size: 0.9rem; }
+
+main { max-width: 960px; margin: 24px auto; padding: 0 16px; outline: none; }
+
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px 24px; }
+.narrow { max-width: 480px; }
+
+form { display: flex; flex-direction: column; gap: 4px; }
+label { font-weight: 600; margin-top: 8px; }
+input, textarea { font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; }
+input[aria-invalid='true'], textarea[aria-invalid='true'] { border-color: var(--danger); }
+.checkbox { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.checkbox label { margin: 0; }
+.field-error { color: var(--danger); margin: 0; font-size: 0.9rem; min-height: 0; }
+[role='alert'] { color: var(--danger); }
+[role='status']:empty { display: none; }
+
+button, .toolbar a {
+  font: inherit;
+  padding: 6px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  text-decoration: none;
+}
+button[hidden] { display: none; }
+td button { background: var(--card); color: var(--accent); padding: 2px 8px; }
+.toolbar { display: flex; gap: 8px; align-items: center; margin: 12px 0; }
+
+table { width: 100%; border-collapse: collapse; background: var(--card); }
+caption { text-align: left; color: var(--muted); padding: 4px 0; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+td a { margin-right: 8px; }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; }
+dt { font-weight: 600; }
+dd { margin: 0; }
