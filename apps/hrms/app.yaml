@@ -1,0 +1,39 @@
+# BLG Technologies HRMS — staging pilot. Credentials live ONLY in .env (never here).
+# requireTargetFlag: zero network calls unless the command carries --target staging.
+schemaVersion: 1
+id: hrms
+name: BLG Technologies HRMS (staging)
+baseUrl: http://hrms-staging.blgtechnologies.in:82/
+apiBaseUrl: http://hrms-staging.blgtechnologies.in:5002/
+apiDocsUrl: http://hrms-staging.blgtechnologies.in:5002/apidocs/   # scoring only, never an inference input
+tenants:
+  - { id: primary, codeEnv: HRMS_TENANT_PRIMARY }
+  - { id: secondary, codeEnv: HRMS_TENANT_SECONDARY }
+roles:
+  - { id: employee, tenant: primary, usernameEnv: HRMS_EMPLOYEE_EMAIL, passwordEnv: HRMS_EMPLOYEE_PASSWORD }
+  - { id: admin, tenant: primary, usernameEnv: HRMS_ADMIN_EMAIL, passwordEnv: HRMS_ADMIN_PASSWORD }
+  - { id: employee2, tenant: primary, usernameEnv: HRMS_EMPLOYEE2_EMAIL, passwordEnv: HRMS_EMPLOYEE2_PASSWORD, optional: true }
+  - { id: other-employee, tenant: secondary, usernameEnv: HRMS_OTHER_TENANT_EMPLOYEE_EMAIL, passwordEnv: HRMS_OTHER_TENANT_EMPLOYEE_PASSWORD, optional: true }
+login:
+  strategy: form
+  url: /
+safety:
+  allowedOrigins:
+    - http://hrms-staging.blgtechnologies.in:82
+    - http://hrms-staging.blgtechnologies.in:5002
+  forbiddenHostPatterns:
+    - '^(www\.)?blgtechnologies\.in$'
+    - '^(?!hrms-staging\.).*blgtechnologies\.in$'
+  requireTargetFlag: true
+  denyActionPatterns: [delete, remove, terminate, deactivate, archive, "run payroll", "process payroll", "lock", "finalize", "approve all", "reject all", approve, reject, edit, update, "bulk", "import", "reset password", "change password", logout, "sign out"]
+  requiresApprovalPatterns: ["punch in", "punch out", "check in", "check out", "clock in", "clock out", "regulariz", "payroll", "arrear"]
+  approvedActions: []
+  maxRps: 2
+  maxReplayRps: 2
+  runTagPrefix: PRM
+budgets: { perCommandUsd: 5, compileUsd: 40 }
+lead: { minutesPerWeek: 90, autoFilePrecision: 0.95, autoFileMinVerdicts: 20, shadowMode: false }
+domainPack: in-hrms
+output:
+  repoPath: ../pramaan-hrms-suite
+  defectSink: markdown

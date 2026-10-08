@@ -1,0 +1,36 @@
+# Local demo HRMS (fixtures/demo-hrms). Fixture creds come from apps/demo/fixture.env.
+schemaVersion: 1
+id: demo
+name: Demo HRMS (local fixture)
+baseUrl: http://localhost:${DEMO_PORT:-4600}
+apiBaseUrl: http://localhost:${DEMO_PORT:-4600}/api
+tenants:
+  - { id: primary, codeEnv: DEMO_TENANT_PRIMARY }
+  - { id: secondary, codeEnv: DEMO_TENANT_SECONDARY }
+roles:
+  - { id: employee, tenant: primary, usernameEnv: DEMO_EMPLOYEE_EMAIL, passwordEnv: DEMO_PASSWORD }
+  - { id: employee2, tenant: primary, usernameEnv: DEMO_EMPLOYEE2_EMAIL, passwordEnv: DEMO_PASSWORD, optional: true }
+  - { id: manager, tenant: primary, usernameEnv: DEMO_MANAGER_EMAIL, passwordEnv: DEMO_PASSWORD }
+  - { id: admin, tenant: primary, usernameEnv: DEMO_ADMIN_EMAIL, passwordEnv: DEMO_PASSWORD }
+  - { id: t2-admin, tenant: secondary, usernameEnv: DEMO_T2_ADMIN_EMAIL, passwordEnv: DEMO_PASSWORD, optional: true }
+  - { id: t2-employee, tenant: secondary, usernameEnv: DEMO_T2_EMPLOYEE_EMAIL, passwordEnv: DEMO_PASSWORD, optional: true }
+login:
+  strategy: form
+  url: /login
+  successSignal: /dashboard
+safety:
+  allowedOrigins:
+    - http://localhost:${DEMO_PORT:-4600}
+  forbiddenHostPatterns: []
+  requireTargetFlag: false
+  denyActionPatterns: [delete, remove, terminate, deactivate, archive, "approve all", "reject all", approve, reject, cancel, edit, update, logout, "sign out"]
+  requiresApprovalPatterns: ["punch in", "punch out"]
+  approvedActions: []
+  maxRps: 10
+  maxReplayRps: 10
+  runTagPrefix: PRM
+budgets: { perCommandUsd: 5, compileUsd: 40 }
+domainPack: in-hrms
+output:
+  repoPath: ../pramaan-demo-suite
+  defectSink: markdown

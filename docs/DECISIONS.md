@@ -1,0 +1,62 @@
+# Decisions (ADR log)
+
+Newest last. Each entry: context → decision → consequence.
+
+## D-001 · 2026-10-08 · Library versions (M0)
+Installed latest stable: typescript 6.0.3, tsx 4.23.15, zod 4.6.5, yaml 2.9.1, commander 15.0.0,
+@anthropic-ai/sdk 0.132.1, @playwright/test 1.64.0, @faker-js/faker 10.6.0, pino 10.4.0, p-limit 7.3.3,
+ts-morph 28.0.0, @inquirer/prompts 8.7.3, dotenv 18.0.6, express 5.2.1, vitest 5.0.3, eslint 10.12.0,
+typescript-eslint 8.71.1, @eslint/js 10.0.1, prettier 3.9.9. Node 24.16 locally, Node 22 in CI.
+
+## D-002 · Structured-output path (§2.4)
+SDK 0.132.1 types `output_config.format: { type: 'json_schema', schema }` as stable on `messages.create`;
+the client tries it first. Fallback is tool use. **Deviation:** forced `tool_choice: {type:'tool'}` is rejected
+(400) on claude-opus-5-5 and claude-sonnet-5-5, so on that 400 the client retries once with
+`tool_choice: auto` + "respond only by calling <tool>" and remembers it per model; Haiku keeps forced tool use.
+The JSON Schema sent to the API is `z.toJSONSchema(schema, {io:'input'})` with objects closed
+(`additionalProperties:false`) and numeric/length limits stripped (unsupported); zod still enforces them on the
+reply. **Live path is unconfirmed until `npm run llm:smoke` runs with Balu's key.**
+
+## D-003 · LLM client details
+Live mode does not read the cache (spec: "call the API"). Record writes only validated replies. `onCall` fires
+whenever the API billed a call, even if the output then fails validation. Default maxTokens 8192.
+Prices in `src/llm/prices.ts` (USD/MTok in/out): opus-5-5 4/20, sonnet-5-5 2/10, haiku-4-5 1/5. Balu: verify.
+
+## D-004 · Schema addition: BugCatalog (§4, additive)
+`BugCatalogEntry`/`BugCatalog` added to schemas.ts for `benchmark/*/bugs.yaml` (shape from §5 plus `mvp: boolean`
+so `csv-export-mismatch` can be excluded from MVP bench). Additive only; SCHEMA_VERSION unchanged.
+
+## D-005 · Demo fixture env + env interpolation in app.yaml
+`apps/demo/fixture.env` (committed, fixture creds only) is a non-overriding fallback after `.env`, so
+`doctor --app demo` and CI work on a clean clone. `app.yaml` supports `${VAR}` / `${VAR:-default}` interpolation
+before parsing; the e2e harness runs the demo on a free port via `DEMO_PORT`, and the target guard sees the same
+origin. A tenant's code env is optional when all its roles are optional.
+
+## D-006 · Ownership guard is stricter than §2.3 #9's wording
+If the path has an ID-like segment, only the path decides (an owned ID in the body cannot unlock a foreign path
+ID). With no path ID, an owned `id`/`*_id`/`*Id` in body or query allows. A foreign top-level `id` in a create
+body blocks. Note for M2: pass the rate limiter only for API traffic, or static assets crawl at 2 rps.
+
+## D-007 · Budget.charge semantics
+`charge()` records spend first, then throws `BudgetExceeded` (money already spent). Callers pre-check with
+`wouldExceed()`; the LLM client does this before every live call.
+
+## D-008 · Demo app choices (§5)
+- `GET /api/leaves/:id` for a non-owner returns 404 (not 403) to avoid leaking existence.
+- emp2 seeds with an approved 1-day leave, so its balance starts 19/20 (consistent; avoids invariant false alarms).
+- Cancel is allowed from draft/submitted/approved (teardown needs it); 409 from rejected/cancelled.
+- `ist-midnight`: §5's example ("23:30 IST stored on the next UTC day") is impossible — 23:30 IST is the *same*
+  UTC date. Implemented as: with `fromTime`, the bug stores the UTC date instead of the IST date (00:30 IST on the
+  10th → stored as the 9th). M10's Boundary Calculator must probe 00:30 IST to catch it.
+- UI-side bugs are driven by neutral `window.__DEMO__` flags so the page never names the active bug.
+- `dashboard-console-error` lists `GET /dashboard` (a page route) in `operations`; M8's hit-matching must accept
+  UI routes for implicit-oracle bugs.
+- Unknown `DEMO_BUGS` / `DEMO_DRIFT` values make the demo refuse to start (fail loudly in bench).
+
+## D-009 · Redaction trade-offs
+Plain 12-digit numbers redact as Aadhaar and 10-digit 6–9 numbers as phones (safe side). Salary-key match is
+unanchored, so e.g. `basicInfo` is over-redacted. Password/token keys only redact string values (so `inputTokens`
+counts survive). Run tags, ISO dates, epoch ms and small IDs are not redacted.
+
+## D-010 · `--target` has a single choice
+commander restricts `--target` to `staging`; `--target production` is a parse error (§2.3 #8).
