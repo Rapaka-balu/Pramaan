@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+workspace/
+playwright-report/
+test-results/
+allure-results/
+.pramaan-cache/*
+!.pramaan-cache/llm/
+.pramaan-cache/llm/*
+!.pramaan-cache/llm/demo/
