@@ -60,3 +60,16 @@ counts survive). Run tags, ISO dates, epoch ms and small IDs are not redacted.
 
 ## D-010 · `--target` has a single choice
 commander restricts `--target` to `staging`; `--target production` is a parse error (§2.3 #8).
+
+## D-011 · Onboarding (M1)
+- Login success = the URL leaves the login path (or matches a `/path` successSignal, or a text signal is visible)
+  AND no alert/error text is visible. After success the page waits for network idle so the HAR shows authed calls.
+- The auth scheme is derived from the login HAR: the Authorization value is matched against localStorage (else a
+  cookie scheme); the tenant header is a non-standard header with a constant value on every /api call, preferring
+  names containing "tenant". Stored in `workspace/<app>/sessions/<role>.meta.json` — where the token lives, not the
+  token itself.
+- Session probe = first 2xx GET, preferring identity endpoints (/me, /profile…). 401/403 → re-login (`refreshed`).
+- Optional roles that fail login are reported but never block; only required-role failures write cannot-proceed.md.
+- `PRAMAAN_STATE_ROOT` (default: repo root) relocates `workspace/`, so e2e tests use temp dirs.
+- Login contexts run behind the target guard, the global rate limiter and the ownership guard (login URL = a path
+  matching login|signin|auth/token|session).

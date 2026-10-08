@@ -3,7 +3,8 @@
 | Milestone | Status | Date |
 | --- | --- | --- |
 | M0 — Scaffold, demo app, LLM client, guards | **done** (llm:smoke pending Balu's key) | 2026-10-08 |
-| M1 — Onboarding harness | next — waiting for "continue" | |
+| M1 — Onboarding harness | **demo done**; HRMS staging run pending creds + OK | 2026-10-08 |
+| M2 — Crawler with HAR capture | next — waiting for "continue" | |
 
 ## M0 — measured (2026-10-08)
 
@@ -18,3 +19,16 @@
 | `redact()` unit cases | 39 (PAN, Aadhaar, IFSC, phone, JWT, auth, salary keys, negatives) |
 | `.gitignore` check-ignore test | pass (demo LLM cache committed, HRMS cache ignored) |
 | `npm run llm:smoke` | skipped — no `ANTHROPIC_API_KEY` yet |
+
+## M1 — measured (2026-10-08)
+
+| Acceptance check | Result |
+| --- | --- |
+| All six demo users log in; API calls succeed with derived AuthMaterial | 6/6 ok in ~8.4 s; GET /api/me → 200 as the right user for each role (e2e) |
+| Derived auth scheme (demo) | bearer from localStorage `demo.token` + tenant header `X-Tenant-Code`; probe GET /api/me |
+| Wrong password → cannot-proceed.md naming role + visible error | `admin`: "Invalid credentials"; exit 2; password never written (e2e) |
+| Token deleted from stored session → automatic refresh | next run `refreshed`, then `reused` (e2e) |
+| safety.blocked events during login | 0 |
+| HRMS without `--target` | all roles skipped, 0 network calls, exit 2 |
+| HRMS staging (employee + admin log in; employee2 / other-tenant "cannot verify") | **not run** — needs `.env` values and Balu's OK |
+| `npm run verify` | green: 19 unit files / 256 tests, 6 e2e tests |

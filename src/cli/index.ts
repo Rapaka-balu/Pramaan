@@ -2,6 +2,8 @@
 // Pramaan CLI. One subcommand per pipeline stage (§3.4). M0: doctor.
 import { Command, Option } from 'commander';
 import { repoRoot } from '../core/config.js';
+import { stateRoot } from '../core/paths.js';
+import { runOnboard } from '../onboarding/onboard.js';
 import { formatDoctor, runDoctor } from './doctor.js';
 
 const program = new Command();
@@ -19,6 +21,23 @@ program
     const report = await runDoctor({ appId: opts.app, root: repoRoot(), target: opts.target });
     console.log(formatDoctor(report));
     process.exitCode = report.ok ? 0 : 1;
+  });
+
+program
+  .command('onboard')
+  .description('contract check, log in as every role, save sessions and derive API auth')
+  .requiredOption('--app <id>', 'app id under apps/')
+  .addOption(targetOption())
+  .option('--role <ids>', 'comma-separated subset of roles')
+  .action(async (opts: { app: string; target?: 'staging'; role?: string }) => {
+    const res = await runOnboard({
+      appId: opts.app,
+      stateRoot: stateRoot(),
+      target: opts.target,
+      roles: opts.role?.split(',').map((s) => s.trim()),
+    });
+    console.log(res.summary);
+    process.exitCode = res.exitCode;
   });
 
 program.parseAsync(process.argv).catch((err: unknown) => {
