@@ -1,0 +1,25 @@
+{
+  "id": "A-012",
+  "ruleId": "R-012",
+  "title": "approval deducts requested days",
+  "data": { "days": 2 },
+  "arrange": [
+    { "kind": "api", "id": "balBefore", "actor": "employee", "op": { "method": "GET", "path": "/api/leave-balance" }, "capture": { "available": "$.available" } },
+    { "kind": "api", "id": "apply", "actor": "employee", "op": { "method": "POST", "path": "/api/leaves" },
+      "body": { "from": "${today+7}", "to": "${today+8}", "days": "${data.days}", "reason": "${run.tag} R-012" },
+      "capture": { "leaveId": "$.id" } }
+  ],
+  "act": [
+    { "kind": "api", "id": "approve", "actor": "admin", "op": { "method": "POST", "path": "/api/leaves/{id}/approve" }, "pathParams": { "id": "${cap.leaveId}" } },
+    { "kind": "api", "id": "balAfter", "actor": "employee", "op": { "method": "GET", "path": "/api/leave-balance" } }
+  ],
+  "assert": [
+    { "kind": "status", "step": "approve", "oneOf": [200], "message": "admin should be able to approve a submitted leave" },
+    { "kind": "delta", "before": "balBefore", "after": "balAfter", "path": "$.available", "expected": "-${data.days}", "message": "available balance should drop by the approved days" }
+  ],
+  "cleanup": [
+    { "kind": "api", "id": "cancel", "actor": "employee", "op": { "method": "POST", "path": "/api/leaves/{id}/cancel" }, "pathParams": { "id": "${cap.leaveId}" } }
+  ],
+  "status": "confirmed",
+  "decision": { "by": "lead:balu", "at": "2026-11-03T10:14:00+05:30" }
+}
