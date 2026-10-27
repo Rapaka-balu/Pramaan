@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// Pramaan CLI. One subcommand per pipeline stage (§3.4). M0: doctor.
+// Pramaan CLI. One subcommand per pipeline stage (§3.4).
 import { Command, Option } from 'commander';
 import { repoRoot } from '../core/config.js';
 import { stateRoot } from '../core/paths.js';
+import { runCrawl } from '../crawler/crawl.js';
 import { runOnboard } from '../onboarding/onboard.js';
 import { formatDoctor, runDoctor } from './doctor.js';
 
@@ -35,6 +36,25 @@ program
       stateRoot: stateRoot(),
       target: opts.target,
       roles: opts.role?.split(',').map((s) => s.trim()),
+    });
+    console.log(res.summary);
+    process.exitCode = res.exitCode;
+  });
+
+program
+  .command('crawl')
+  .description('BFS-crawl the app as each role (HAR + state snapshots), then tear down created records')
+  .requiredOption('--app <id>', 'app id under apps/')
+  .addOption(targetOption())
+  .option('--role <ids>', 'comma-separated subset of roles')
+  .option('--max-states <n>', 'override crawl.maxStatesPerRole', (v) => Number.parseInt(v, 10))
+  .action(async (opts: { app: string; target?: 'staging'; role?: string; maxStates?: number }) => {
+    const res = await runCrawl({
+      appId: opts.app,
+      stateRoot: stateRoot(),
+      target: opts.target,
+      roles: opts.role?.split(',').map((s) => s.trim()),
+      maxStates: opts.maxStates,
     });
     console.log(res.summary);
     process.exitCode = res.exitCode;

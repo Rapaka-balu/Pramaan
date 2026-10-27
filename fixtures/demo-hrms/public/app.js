@@ -355,6 +355,7 @@
       const row = cloneTemplate('tpl-approval-row');
       row.querySelector('tr').setAttribute('data-leave-id', String(leave.id));
       fillFields(row, { ...leave, days: formatDays(leave.days) });
+      row.querySelector('[data-field="view"]').setAttribute('href', `/leaves/${leave.id}`);
       for (const button of row.querySelectorAll('button[data-action]')) {
         const action = button.getAttribute('data-action');
         button.setAttribute('aria-label', `${button.textContent} leave of ${leave.employeeName}: ${leave.reason}`);

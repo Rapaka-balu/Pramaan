@@ -115,6 +115,8 @@ export interface OwnershipGuardOptions {
   onBlocked: (info: { method: string; path: string; reason: string }) => void;
   guard?: { check(url: string): { ok: boolean; reason?: string } };
   limiter?: { acquire(): Promise<void> };
+  /** Which URLs pass through the limiter (default: all). The crawler limits API traffic only (D-006). */
+  limitWhen?: (url: string) => boolean;
 }
 
 function pathOf(url: string): string {
@@ -140,7 +142,7 @@ export async function installOwnershipGuard(context: BrowserContext, opts: Owner
         return route.abort('blockedbyclient');
       }
     }
-    if (opts.limiter) await opts.limiter.acquire();
+    if (opts.limiter && (opts.limitWhen?.(url) ?? true)) await opts.limiter.acquire();
 
     const d = decideOwnership({
       method,
