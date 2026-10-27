@@ -52,7 +52,7 @@ Pramaan (Sanskrit: *proof*) is an autonomous multi-agent QA system. Given only a
 - No `eval`, `new Function`, `vm`, or libraries that use them (this rules out `jsonpath-plus`). Write the small JSONPath subset and the expression evaluator yourself (§4.6).
 - Cross-platform: Balu may be on Windows. No bash-only scripts. Use Node scripts and `path.join`. No hard-coded `/`.
 - Logging goes through `src/core/log.ts` (pino or a small wrapper). Secrets are never logged: the logger runs every message through `redact()`.
-- Every command finishes with a one-screen summary: what ran, counts, cost in USD, where the outputs are, what needs the lead.
+- Every command finishes with a one-screen summary: what ran, counts, LLM requests used and left today per provider, where the outputs are, what needs the lead.
 
 ### 2.2 For the test code Pramaan generates (the "suite repo")
 These are Balu's house conventions. Generated code must follow them exactly, and the suite repo's ESLint config enforces them (M6).
@@ -84,12 +84,37 @@ These are Balu's house conventions. Generated code must follow them exactly, and
    Each abort is logged as `safety.blocked`, with method, path and the reason. This rule protects real records on shared staging even when a deny pattern misses a button such as "Approve", "Save" on an edit form, or "Reject". Unit-test it, and include it in the M2 e2e.
 
 ### 2.4 LLM usage rules
-- One client: `src/llm/client.ts`. Nothing else imports `@anthropic-ai/sdk`.
-- Models come from env vars, with these defaults:
-  - `PRAMAAN_MODEL_FRONTIER=claude-opus-5-5`: rule proposals, assertion authoring.
-  - `PRAMAAN_MODEL_MID=claude-sonnet-5-5`: naming, triage summaries, charter planning.
-  - `PRAMAAN_MODEL_SMALL=claude-haiku-4-5-20251001`: form data, frontier ranking.
-- **Structured output.** Request JSON with `output_config: { format: { type: 'json_schema', schema } }`. Build the JSON Schema from the zod schema with `z.toJSONSchema()` (zod v4), then validate the reply with the same zod schema. The M0 smoke test confirms this works with the installed SDK. If the SDK types or the API reject it, fall back to forced tool use: one tool whose `input_schema` is the schema, plus `tool_choice: { type: 'tool', name }`. Record which path is live in `docs/DECISIONS.md`. Use `z.toJSONSchema(schema, { io: 'input' })`. If the API rejects a schema feature, define an LLM-facing variant in `src/llm/schemas/` and convert it to the §4 type in code. Typical rejected features are open `unknown` values such as `body` or `data`, regex-keyed records, and refinements. For example, the variant can carry `body` as a JSON string that you then parse. Check `stop_reason`: `refusal` or `max_tokens` is an error, never parsed.
+**Pramaan runs on free LLM tiers only, at $0.** Balu has no paid LLM budget. Every provider below is reached through its **OpenAI-compatible endpoint** with the `openai` npm package, so one client covers all of them. There are no paid SDKs, and no `@anthropic-ai/sdk`.
+
+- **One client.** Only `src/llm/client.ts` (with `src/llm/providers.ts`) imports `openai`. Nothing else talks to an LLM.
+- **Providers** (`src/llm/providers.ts`; the shape is in §2.5):
+
+| Provider | Base URL | Key env | Free-tier limits (check the provider console; they change) | Trains on free-tier data? |
+| --- | --- | --- | --- | --- |
+| `gemini` (Google AI Studio) | `https://generativelanguage.googleapis.com/v1beta/openai/` | `GEMINI_API_KEY` | Per-model limits shown in AI Studio | **Yes** |
+| `groq` | `https://api.groq.com/openai/v1` | `GROQ_API_KEY` | `gpt-oss-120b` and `gpt-oss-20b`: 30 RPM, 1,000 RPD, 8K TPM, 200K TPD each | No (abuse logs only) |
+| `openrouter` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | `:free` models: 20 RPM; 50 RPD (1,000 RPD after a one-time $10 top-up) | Depends on the upstream provider; treat as **yes** |
+| `ollama` (local, optional) | `http://localhost:11434/v1` | none | Your hardware | No (nothing leaves the laptop) |
+
+- **Tiers are fallback chains**, set as env vars in `provider:model` form, comma-separated and tried in order. Split each entry on the **first** colon only, because OpenRouter IDs end in `:free`:
+  - `PRAMAAN_TIER_FRONTIER` (rule proposals, assertion authoring; long prompts, needs the best reasoning). Default: `gemini:gemini-3.8-flash,openrouter:nvidia/nemotron-3-super-120b-a12b:free,groq:openai/gpt-oss-120b`
+  - `PRAMAAN_TIER_MID` (naming, triage summaries, charter planning, matrix proposals). Default: `groq:openai/gpt-oss-120b,gemini:gemini-3.5-flash,openrouter:google/gemma-4-31b-it:free`
+  - `PRAMAAN_TIER_SMALL` (form data, frontier rerank; many short calls). Default: `groq:openai/gpt-oss-20b,gemini:gemini-3.5-flash-lite`
+- **Privacy routing (hard rule).** `PRAMAAN_ALLOW_TRAINING_PROVIDERS` defaults to `false`. While it is false, the client **skips** every route whose provider trains on free-tier data (`gemini`, `openrouter`) and uses only `groq` or `ollama`. Balu sets it to `true` **for the HRMS pilot only**, after his CEO agrees, because that pilot uses redacted, synthetic test data on the company's own staging app. For any client's app it stays `false`, unless that client agrees in writing. Log every skipped route as `llm.call` with `{ skipped: 'training-provider' }`.
+- **Quotas, not dollars.** Each provider has an `rpm` and an `rpd` limit (§2.5).
+  - Set both to about 90% of the real limits, as safety margin.
+  - Enforce `rpm` with a token-bucket limiter.
+  - Enforce `rpd` with a counter persisted at `.pramaan-cache/quota/<provider>-<YYYY-MM-DD>.json`, using the UTC date; most providers reset at UTC midnight.
+  - When a route is at its quota, or returns 429, try the next route in the chain. When the whole chain is exhausted, the call site runs its **deterministic fallback** (as in `replay-or-off`) and logs `{ fallback: 'quota' }`. Commands never crash on quota.
+  - Truncate prompts to fit Groq's 8K tokens/minute: chunk large inputs (rule proposal digests) by entity.
+- **Structured output** (works across providers of uneven quality):
+  1. Send `response_format: { type: 'json_schema', json_schema: { name, schema, strict: false } }`, with the schema from `z.toJSONSchema(schema, { io: 'input' })`.
+  2. If the provider rejects that, retry with `response_format: { type: 'json_object' }` and the JSON Schema pasted into the prompt.
+  3. Strip any code fence from the reply and `JSON.parse` it, then validate with the zod schema.
+  4. If validation fails, make **one** repair turn that quotes the zod error. After that, throw.
+
+  `finish_reason` of `length` or `content_filter` is an error, never parsed. Record which path each provider/model actually needs in `docs/DECISIONS.md`. If a provider rejects a schema feature, define an LLM-facing variant in `src/llm/schemas/` and convert it to the §4 type in code. Typical rejected features are open `unknown` values such as `body` or `data`, regex-keyed records, and refinements; for example, carry `body` as a JSON string that you then parse.
+- **Expect weaker models than frontier paid ones.** That is acceptable by design: the LLM never judges. Evidence-ID validation, schema validation, the dry-run of every assertion and the lead's review all filter bad output. Track the **rejection rate per route** (`llm.rejected-output` ÷ calls) in the closure report. If one route keeps failing validation, move it down its chain.
 - Modes come from `PRAMAAN_LLM_MODE`:
   - `live`: call the API.
   - `record`: call the API and write the response to the cache.
@@ -98,9 +123,107 @@ These are Balu's house conventions. Generated code must follow them exactly, and
   - `off`: never call. Each call site's deterministic fallback runs instead.
 
   **Unit and e2e tests always run in `replay-or-off`, `replay` or `off`.** The cache key is `sha256(appId + model + systemPrompt + messages + schemaHash + promptVersion)`. The cache lives in `.pramaan-cache/llm/<appId>/` and is committed only for the demo app (see the `.gitignore` lines in §6).
-- **Budgets.** Every call appends an `llm.call` event (input tokens, output tokens, estimated USD, cached, purpose) to the single ledger, `workspace/<app>/ledger/events.jsonl` (§4.7). Cost uses a price table in `src/llm/prices.ts`. Balu edits that table. An unknown model logs a warning and counts as $0. Each command has a USD cap, `budgets.perCommandUsd` (default 5). The compile pipeline has its own cap, `budgets.compileUsd` (default 40). Exceeding a cap stops the command cleanly and reports. Balu's AI budget needs CEO approval, so be frugal: cache, batch, truncate.
+- **Accounting.** Every call appends an `llm.call` event to the single ledger, `workspace/<app>/ledger/events.jsonl` (§4.7). The event records provider, model, input tokens, output tokens, `usd: 0`, cached, path, purpose, and any `skipped` or `fallback` reason. Keep `budgets.perCommandUsd` and `budgets.compileUsd` in the schema for a future paid tier. With free providers, the binding limit is the quota. Each command prints the requests it used per provider and the requests left today. Be frugal: cache everything, batch, truncate. In the free tiers, quota is the scarce resource.
 - Prompts live in `src/llm/prompts/<name>.md` with front-matter `version:`. Bumping a prompt changes its cache keys.
 - **Evidence discipline.** Any LLM output that cites evidence may cite only evidence IDs that were in its input. The validator rejects any item citing an unknown ID, which is how hallucinated rules are dropped. Count and report rejections.
+
+### 2.5 Reference: provider table and one structured call (`src/llm/providers.ts` + core of `client.ts`)
+
+This compiles under the §2.1 strict settings with `openai` 7.x and `zod` 4.x. Build the rest around it in `client.ts`: the cache, the modes, the rpm limiter, the persisted rpd counter, chain fallback, privacy routing and ledger events. The `rpm`/`rpd` values are about 90% of the documented free limits. Correct them from each provider's console during M0 and note the result in DECISIONS.md. Gemini's limits are shown only in AI Studio, so treat its numbers here as placeholders.
+
+```ts
+import OpenAI from 'openai';
+import { z } from 'zod';
+
+export type ProviderId = 'gemini' | 'groq' | 'openrouter' | 'ollama';
+
+export interface ProviderSpec {
+  id: ProviderId;
+  baseURL: string;
+  apiKeyEnv: string | null;        // null for local Ollama
+  rpm: number;                     // requests per minute (enforced client-side)
+  rpd: number;                     // requests per day (persisted counter keyed by UTC date)
+  trainsOnFreeTier: boolean;       // true = prompts may be used by the provider to improve models
+}
+
+export const PROVIDERS: Record<ProviderId, ProviderSpec> = {
+  gemini:     { id: 'gemini',     baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/', apiKeyEnv: 'GEMINI_API_KEY',     rpm: 10, rpd: 200,  trainsOnFreeTier: true },
+  groq:       { id: 'groq',       baseURL: 'https://api.groq.com/openai/v1',                          apiKeyEnv: 'GROQ_API_KEY',       rpm: 25, rpd: 900,  trainsOnFreeTier: false },
+  openrouter: { id: 'openrouter', baseURL: 'https://openrouter.ai/api/v1',                            apiKeyEnv: 'OPENROUTER_API_KEY', rpm: 15, rpd: 45,   trainsOnFreeTier: true },
+  ollama:     { id: 'ollama',     baseURL: 'http://localhost:11434/v1',                               apiKeyEnv: null,                 rpm: 60, rpd: 100000, trainsOnFreeTier: false },
+};
+
+export interface Route { provider: ProviderId; model: string }
+
+/** "gemini:gemini-3.8-flash, openrouter:nvidia/nemotron-3-super-120b-a12b:free" → Route[] (split on FIRST colon only). */
+export function parseChain(raw: string): Route[] {
+  return raw.split(',').map((s) => s.trim()).filter(Boolean).map((entry) => {
+    const i = entry.indexOf(':');
+    if (i < 1) throw new Error(`Bad route "${entry}" — expected provider:model`);
+    const provider = entry.slice(0, i) as ProviderId;
+    if (!(provider in PROVIDERS)) throw new Error(`Unknown provider "${provider}" in "${entry}"`);
+    return { provider, model: entry.slice(i + 1) };
+  });
+}
+
+export class QuotaExhausted extends Error {}
+
+/** One structured call against one route. Tries json_schema, then json_object + schema-in-prompt, then one repair turn. */
+export async function callStructured<T>(
+  route: Route,
+  schema: z.ZodType<T>,
+  schemaName: string,
+  system: string,
+  user: string,
+): Promise<{ value: T; path: 'json_schema' | 'json_object' | 'repair'; inputTokens: number; outputTokens: number }> {
+  const spec = PROVIDERS[route.provider];
+  const apiKey = spec.apiKeyEnv === null ? 'ollama' : process.env[spec.apiKeyEnv];
+  if (!apiKey) throw new Error(`${spec.apiKeyEnv} is not set`);
+  const client = new OpenAI({ apiKey, baseURL: spec.baseURL, maxRetries: 2 });
+  const jsonSchema = z.toJSONSchema(schema, { io: 'input' }) as Record<string, unknown>;
+  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+    { role: 'system', content: system },
+    { role: 'user', content: user },
+  ];
+
+  const parse = (text: string | null | undefined): T => {
+    if (!text) throw new Error('empty completion');
+    const cleaned = text.trim().replace(/^`{3}(?:json)?\s*/i, '').replace(/`{3}$/, '');
+    return schema.parse(JSON.parse(cleaned));
+  };
+
+  let res: OpenAI.Chat.ChatCompletion;
+  let path: 'json_schema' | 'json_object' | 'repair' = 'json_schema';
+  try {
+    res = await client.chat.completions.create({
+      model: route.model, messages, temperature: 0,
+      response_format: { type: 'json_schema', json_schema: { name: schemaName, schema: jsonSchema, strict: false } },
+    });
+  } catch (e) {
+    if (e instanceof OpenAI.APIError && e.status === 429) throw new QuotaExhausted(`${route.provider}:${route.model} 429`);
+    path = 'json_object';
+    res = await client.chat.completions.create({
+      model: route.model, temperature: 0, response_format: { type: 'json_object' },
+      messages: [...messages, { role: 'user', content: `Reply with ONE JSON object only, matching this JSON Schema:\n${JSON.stringify(jsonSchema)}` }],
+    });
+  }
+  const choice = res.choices[0];
+  if (!choice || choice.finish_reason === 'length' || choice.finish_reason === 'content_filter') {
+    throw new Error(`unusable completion: ${choice?.finish_reason ?? 'none'}`);
+  }
+  const usage = { inputTokens: res.usage?.prompt_tokens ?? 0, outputTokens: res.usage?.completion_tokens ?? 0 };
+  try {
+    return { value: parse(choice.message.content), path, ...usage };
+  } catch (err) {
+    const repaired = await client.chat.completions.create({
+      model: route.model, temperature: 0, response_format: { type: 'json_object' },
+      messages: [...messages, { role: 'assistant', content: choice.message.content ?? '' },
+        { role: 'user', content: `That JSON failed validation: ${(err as Error).message.slice(0, 800)}. Return the corrected JSON object only.` }],
+    });
+    return { value: parse(repaired.choices[0]?.message.content), path: 'repair', ...usage };
+  }
+}
+```
 
 ---
 
@@ -131,7 +254,7 @@ pramaan/
     cli/index.ts                # commander; one subcommand per pipeline stage
     core/                       # config loading, schemas.ts, log, ids, runId, redact, target-guard,
                                 # rate-limit, ledger, budget, stable-json, time (Asia/Kolkata helpers)
-    llm/                        # client, cache, prices, prompts/*.md
+    llm/                        # client, providers, quota, cache, schemas/ (LLM-facing variants), prompts/*.md
     onboarding/                 # contract check, login strategies, session store
     crawler/                    # bfs, state-key, candidates, safety, form-fill, capture
     spec/                       # har→openapi, path-normalize, schema-infer, role-matrix, entities,
@@ -481,7 +604,7 @@ export const LedgerEvent = z.object({
 // Required data keys by type (validated in ledger.append):
 //   finding.verdict  → { findingId, oracle: OracleClass, verdict: 'true-positive'|'false-positive'|'duplicate' }
 //   lead.session     → { minutes: number, itemsDecided: number }
-//   llm.call         → { model, inputTokens, outputTokens, usd, cached: boolean, purpose }
+//   llm.call         → { provider, model, inputTokens, outputTokens, usd /* 0 on free tiers */, cached: boolean, purpose, path?, skipped?, fallback? }
 //   data.created     → { entity, id, operation, teardownOp?: string }
 ```
 
@@ -548,11 +671,15 @@ Staging is reachable only on Balu's network, and you must never experiment on it
 
 ```dotenv
 # --- LLM ---
-ANTHROPIC_API_KEY=
-PRAMAAN_LLM_MODE=replay            # live | record | replay | off
-PRAMAAN_MODEL_FRONTIER=claude-opus-5-5
-PRAMAAN_MODEL_MID=claude-sonnet-5-5
-PRAMAAN_MODEL_SMALL=claude-haiku-4-5-20251001
+# --- LLM (free tiers only; see §2.4) ---
+GEMINI_API_KEY=                    # https://aistudio.google.com → Get API key (no card)
+GROQ_API_KEY=                      # https://console.groq.com → API Keys (no card)
+OPENROUTER_API_KEY=                # https://openrouter.ai → Keys (no card; 50 free req/day)
+PRAMAAN_LLM_MODE=replay-or-off     # live | record | replay | replay-or-off | off
+PRAMAAN_ALLOW_TRAINING_PROVIDERS=false   # true ONLY for the HRMS pilot, after CEO OK
+PRAMAAN_TIER_FRONTIER=gemini:gemini-3.8-flash,openrouter:nvidia/nemotron-3-super-120b-a12b:free,groq:openai/gpt-oss-120b
+PRAMAAN_TIER_MID=groq:openai/gpt-oss-120b,gemini:gemini-3.5-flash,openrouter:google/gemma-4-31b-it:free
+PRAMAAN_TIER_SMALL=groq:openai/gpt-oss-20b,gemini:gemini-3.5-flash-lite
 
 # --- HRMS staging (Balu fills; never commit .env) ---
 HRMS_TENANT_PRIMARY=TEST
@@ -617,7 +744,7 @@ Add a unit test that runs `git check-ignore` on a demo cache file and a HRMS cac
 
 For anything else, make the reasonable call and log it in `docs/DECISIONS.md`.
 
-**Recording LLM fixtures:** when a milestone adds an LLM call, run the demo e2e once with `PRAMAAN_LLM_MODE=record`. That needs Balu's API key and his OK on cost. Show him the estimated USD first. Commit the demo cache so CI and future sessions replay it for free.
+**Recording LLM fixtures:** when a milestone adds an LLM call, run the demo e2e once with `PRAMAAN_LLM_MODE=record`. That uses free-tier quota, so show Balu the estimated request count per provider first. The demo app's data is synthetic, so training providers are fine there; set `PRAMAAN_ALLOW_TRAINING_PROVIDERS=true` for demo recordings only. Commit the demo cache so CI and future sessions replay it for free.
 
 ---
 
@@ -635,10 +762,10 @@ Each milestone lists: **Goal · Build · Contracts/notes · Acceptance (all must
    - `verify` = `typecheck && lint && test && e2e:demo` (never `dev`, which is long-running). `e2e:demo` starts the demo app itself on a free port, through Playwright's `webServer` or a programmatic start/stop in global setup and teardown, and sets `PRAMAAN_LLM_MODE=replay-or-off`.
    - `demo`, `doctor`, `llm:smoke`
 
-   Dependencies (install the latest stable versions and record them in DECISIONS.md): `typescript`, `tsx`, `zod@^4`, `yaml`, `commander`, `@anthropic-ai/sdk`, `@playwright/test`, `@faker-js/faker`, `pino`, `p-limit`, `ts-morph`, `@inquirer/prompts`, `dotenv`, `express`, `vitest`, `eslint`, `typescript-eslint`, `prettier`. Install Playwright browsers with `npx playwright install chromium firefox webkit`.
+   Dependencies (install the latest stable versions and record them in DECISIONS.md): `typescript`, `tsx`, `zod@^4`, `yaml`, `commander`, `openai` (used only as an OpenAI-compatible client for free providers), `@playwright/test`, `@faker-js/faker`, `pino`, `p-limit`, `ts-morph`, `@inquirer/prompts`, `dotenv`, `express`, `vitest`, `eslint`, `typescript-eslint`, `prettier`. Install Playwright browsers with `npx playwright install chromium firefox webkit`.
 2. `src/core/schemas.ts`: copy §4 exactly, then add `test/unit/schemas.test.ts` with one valid and one invalid fixture per schema.
 3. `src/core/`: `config.ts` (loads `app.yaml` and resolves env), `target-guard.ts`, `rate-limit.ts`, `redact.ts`, `ledger.ts`, `budget.ts`, `run-id.ts` (`YYYYMMDD-HHmm-<4 hex>`, Asia/Kolkata), `stable-json.ts`, `time.ts`.
-4. `src/llm/`: `client.ts`, `cache.ts`, `prices.ts`, and `prompts/` (empty). Add `scripts/llm-smoke.ts`. It asks the frontier model for a tiny schema-validated object using `output_config.format`, falls back to forced tool use, and prints which path worked and what it cost.
+4. `src/llm/`: `providers.ts`, `client.ts`, `quota.ts`, `cache.ts`, `schemas/` and `prompts/` (empty), built from §2.4 and §2.5. Add `scripts/llm-smoke.ts`. For **every route in all three tier chains** whose key is set, it asks for a tiny schema-validated object (`{ ok: true, sum: 2 + 3 }`). It prints a table of route × structured-output path (`json_schema` / `json_object` / `repair` / failed) × latency × tokens, and respects `PRAMAAN_ALLOW_TRAINING_PROVIDERS`. Paste the table into DECISIONS.md.
 5. `fixtures/demo-hrms/` as described in §5, plus `benchmark/demo/bugs.yaml`.
 6. `apps/demo/app.yaml` and `apps/hrms/app.yaml`. Use the values in §1 and §6. HRMS safety starts with:
    - `denyActionPatterns: [delete, remove, terminate, deactivate, archive, "run payroll", "process payroll", "lock", "finalize", "approve all", "reject all", approve, reject, edit, update, "bulk", "import", "reset password", "change password", logout, "sign out"]`. `approve`, `reject`, `edit` and `update` remain usable on owned records through the owned-record exception, and the network ownership guard (§2.3 #9) is the backstop.
@@ -661,9 +788,10 @@ Each milestone lists: **Goal · Build · Contracts/notes · Acceptance (all must
 - The ownership guard unit tests pass: a non-GET request on a non-owned ID is aborted, create and owned-ID requests are allowed.
 - The target guard has unit tests: an allowed origin passes, a non-allowed origin throws, a forbidden host pattern throws even if allow-listed.
 - `redact()` has at least 20 unit cases, including the PAN, Aadhaar and salary-key patterns.
-- `npm run llm:smoke` (only if Balu gave a key) prints the working structured-output path and its cost.
+- `npm run llm:smoke` (once Balu has added the free keys) prints the route table. At least one route per tier must succeed. With all keys removed, every LLM call site falls back cleanly and `verify` stays green.
+- Unit tests cover `parseChain` (including `:free` model IDs), chain fallback on 429, the persisted daily counter, and privacy routing that skips `gemini` and `openrouter` when the flag is false.
 
-**Needs Balu:** `ANTHROPIC_API_KEY` with a budget OK, HRMS `.env` values, and approval of the HRMS safety lists.
+**Needs Balu:** the free keys (`GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`), the CEO's OK before setting `PRAMAAN_ALLOW_TRAINING_PROVIDERS=true` for the HRMS pilot, the HRMS `.env` values, and approval of the HRMS safety lists.
 
 ### M1 — Onboarding harness (week 1–2)
 
@@ -862,14 +990,14 @@ Each milestone lists: **Goal · Build · Contracts/notes · Acceptance (all must
 
   `pramaan compile` runs the suite's `tsc --noEmit` and ESLint and **fails the compile** if either fails.
 - **Config.** `playwright.config.ts` in the suite: `projects` with Chromium only in the MVP (v1 adds more), the reporters `['json', { outputFile: 'results.json' }]`, `['allure-playwright']` and `['list']`, `retries: 0` (flakiness is triaged, not retried away), and `trace: 'retain-on-failure'`.
-- **Dependencies.** The suite's `package.json` pins exact versions (`@playwright/test`, `allure-playwright`, `zod`, `typescript`, `eslint`, `typescript-eslint`, `@faker-js/faker`, `dotenv`). On first creation, and whenever dependencies change, `pramaan compile` runs `npm install` in the suite to produce `package-lock.json` and commits it, so `npm ci` works everywhere. The suite must **not** depend on `@anthropic-ai/sdk` or on Pramaan.
+- **Dependencies.** The suite's `package.json` pins exact versions (`@playwright/test`, `allure-playwright`, `zod`, `typescript`, `eslint`, `typescript-eslint`, `@faker-js/faker`, `dotenv`). On first creation, and whenever dependencies change, `pramaan compile` runs `npm install` in the suite to produce `package-lock.json` and commits it, so `npm ci` works everywhere. The suite must **not** depend on any LLM SDK (`openai`, `@anthropic-ai/sdk` and the like) or on Pramaan.
 - **Docs and CI.** `PRAMAAN.md` describes the coverage table and how to run the suite. `.github/workflows/qa.yml` runs smoke on push and regression on a nightly cron, and uploads `results.json` as an artifact for `pramaan triage` to import.
 - **Run.** `pramaan run` executes `npx playwright test --grep @<suite>` inside the suite repo, with `PRAMAAN_RUN_ID` set, and copies `results.json` into the workspace.
 
 **Acceptance:**
 - Demo app: `pramaan compile` followed by `cd suite && npm ci && npx playwright test` passes on `DEMO_BUGS=none`. Prove the suite is LLM-free three ways:
-  1. The suite's `package.json` and `package-lock.json` contain no `@anthropic-ai/sdk`.
-  2. `grep -ri anthropic` over the suite's code returns nothing.
+  1. The suite's `package.json` and `package-lock.json` contain no `openai` or `@anthropic-ai/sdk` package.
+  2. A case-insensitive search of the suite's code for `openai|anthropic|generativelanguage|groq|openrouter|11434` finds nothing.
   3. `pramaan compile` run in `replay` mode logs only `llm.call` events with `cached: true`.
 - With `DEMO_BUGS=stale-ui-balance`, a consistency test fails; on `none` it passes.
 - The lint fails on a deliberately bad generated file in a unit test, for each custom rule.
@@ -993,7 +1121,7 @@ The faults:
   - strings: the observed max length + 1, plus 201 characters as a probe.
 
   It replays each 3 times and compares the observed acceptance (2xx versus 4xx) with the domain-pack rule or validation messages seen in the UI. Divergences become proposed rules with evidence.
-- **Weekly runs.** `pramaan charter` runs both charters under a budget (`perCommandUsd`) and a time cap (30 minutes).
+- **Weekly runs.** `pramaan charter` runs both charters within the free daily quota (it stops planning and falls back to deterministic enumeration when the quota runs out) and a time cap of 30 minutes.
 - **Digest.** `src/lead/digest.ts` writes `digest/DIGEST-<ISO week>.md`:
   - the minutes used against the budget;
   - the queue, top items first;
@@ -1033,7 +1161,7 @@ The faults:
 | Flake rate, demo | < 2% over 50 runs | `npx playwright test --repeat-each=50` in the suite, imported by triage |
 | Orphaned (live) records after teardown, demo | 0 | `orphans()` |
 | Mutating requests to non-owned records | 0 | demo server request log vs. ledger |
-| `npm run verify` on a clean clone, with no API key | green | CI |
+| `npm run verify` on a clean clone, with no LLM keys | green | CI |
 
 *Part B — HRMS pilot gate (Balu owns; two different weeks):*
 
@@ -1043,8 +1171,8 @@ The faults:
 | Seeded authz/tenant bugs caught, HRMS | 100% | bench, category filter |
 | Precision of auto-filed findings | ≥ 90% | `finding.verdict` events |
 | Lead minutes per week (from week 3) | ≤ 90 | `lead.session` events |
-| Compile cost | ≤ $40 | `llm.call` events |
-| LLM cost per regression run | ≤ $0.50 (target $0) | `llm.call` events during `run` |
+| Compile fits in one day of free quota (no `fallback: 'quota'` on rule or assertion proposals) | yes | `llm.call` events |
+| LLM calls per regression run | 0 | `llm.call` events during `run` |
 | Flake rate on nightly CI | < 2% over 50 runs | imported CI `results.json` |
 | Orphaned (live) records after teardown | 0 | `orphans()` |
 | `safety.blocked` events that were wrong blocks or misses | 0 | Balu reviews the audit list |
@@ -1208,7 +1336,7 @@ v1 has three aims:
 | Precision of auto-filed findings | ≥ 90% |
 | New app onboarded to first compiled suite | ≤ 1 day |
 | Lead minutes per week per app | ≤ 60 |
-| Full run cost (regression + NFR, excluding weekly charters) | ≤ $5 |
+| LLM calls per full run (regression + NFR, excluding weekly charters) | 0; weekly charters fit in one day of free quota |
 | Charter candidate confirmation rate | ≥ 60% |
 | Mutation kill rate | ≥ 70% |
 | Test-type coverage | All of: smoke, sanity, functional, regression, E2E multi-role, API, integration, data integrity, authz, exploratory (charters), a11y, i18n, visual, cross-browser, responsive, web vitals, perf smoke |
@@ -1338,7 +1466,55 @@ for (const row of matrix) {
 
 Write this file verbatim at the repo root in M0. Claude Code loads `CLAUDE.md` into every session, and shorter files are followed more reliably. The long spec therefore stays in `PRAMAAN_BUILD_SPEC.md` and is read on demand. **Do not** add an `@`-import of the spec to `CLAUDE.md`: an import would load the whole spec into every session.
 
-(The verbatim content is the repo's `CLAUDE.md`, created in M0.)
+~~~markdown
+# Pramaan — standing rules
+
+Pramaan is an autonomous multi-agent QA system. Agents author tests; deterministic code judges them.
+Full spec: `PRAMAAN_BUILD_SPEC.md` (read only the section for the current milestone).
+Status: `docs/PROGRESS.md` · Decisions: `docs/DECISIONS.md` · Open asks: `docs/NEEDS-BALU.md`
+
+## Every session
+1. Read docs/PROGRESS.md and docs/NEEDS-BALU.md; find the current milestone.
+2. Read that milestone in the spec (§8 MVP, §9 v1). Make a short checklist.
+3. Tests first for pure logic. Then commands. Then demo e2e.
+4. `npm run verify` must be green (typecheck, lint, unit, demo e2e in replay mode).
+5. Run the milestone's acceptance checks; paste measured numbers into PROGRESS.md.
+6. Commit `feat(mN): …` in small steps. Stop and report in ≤5 lines. Wait for "continue".
+
+## Never
+- Never call an LLM to pass/fail a test or file a bug. LLM output is a proposal, validated by zod.
+- Never run against a host not in app.yaml safety.allowedOrigins. There is no production target.
+- Never click deny-pattern actions; approval-pattern actions only if listed in safety.approvedActions.
+- Never mutate records Pramaan did not create (owned = in this run's data.created ledger). The network
+  ownership guard (src/core/ownership-guard.ts) must wrap every crawler/replay context — never bypass it.
+- Never make network calls to an app with requireTargetFlag unless the command has --target staging.
+- Never send credentials, tokens or un-redacted payloads to the LLM. Run redact() first.
+- Never log secrets. Never commit .env, workspace/, raw HAR.
+- Never use eval/new Function/vm or libs that do (no jsonpath-plus).
+- Never use `any`. Parse unknown input with the zod schemas in src/core/schemas.ts.
+- Never weaken an assertion, add test.skip/fixme/only, or add waitForTimeout in generated code.
+- Never change §4 contracts without a DECISIONS.md entry and Balu's OK.
+
+## Generated suite conventions (enforced by the suite's ESLint)
+- Locators: data-testid → getByRole → getByLabel → getByPlaceholder → CSS #id. No XPath, no class selectors.
+- No hard-coded waits. Web-first assertions only.
+- Test names: should_[action]_when_[condition]. Every expect has a message. Arrange/Act/Assert comments.
+- POM layers: pages/ flows/ specs/ fixtures/ helpers/ config/. Strict TS, no any. en_IN data, Asia/Kolkata.
+
+## LLM
+- Free tiers only, via the `openai` package against OpenAI-compatible endpoints (Gemini, Groq, OpenRouter, Ollama).
+  Only src/llm/client.ts + providers.ts talk to an LLM. Modes: live|record|replay|replay-or-off|off (tests: replay-or-off).
+- Tiers are fallback chains in env: PRAMAAN_TIER_FRONTIER / _MID / _SMALL (provider:model, split on first colon).
+- PRAMAAN_ALLOW_TRAINING_PROVIDERS=false → never send data to gemini/openrouter. Quota exhausted → next route → deterministic fallback.
+- Cite-only-given-evidence: drop any output citing unknown evidence ids.
+
+## Ask Balu before
+First staging contact in a milestone · adding approvedActions · raising budgets · native/Python/>5MB deps ·
+changing contracts · disabling any safety rule · recording LLM fixtures (show estimated cost).
+
+## Commands
+npm run verify · npm run demo · npx tsx src/cli/index.ts <command> --app demo|hrms [--target staging]
+~~~
 
 ---
 

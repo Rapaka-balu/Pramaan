@@ -73,3 +73,31 @@ commander restricts `--target` to `staging`; `--target production` is a parse er
 - `PRAMAAN_STATE_ROOT` (default: repo root) relocates `workspace/`, so e2e tests use temp dirs.
 - Login contexts run behind the target guard, the global rate limiter and the ownership guard (login URL = a path
   matching login|signin|auth/token|session).
+
+## D-010 · 2026-10-27 · Keyless mode until an LLM key is bought
+Balu has no LLM API key yet (spec v2 moves to free tiers; he may buy a key later). Decision: **Pramaan runs keyless**
+— `PRAMAAN_LLM_MODE=off` / `replay-or-off`, and every LLM call site uses its deterministic fallback. The existing
+Anthropic client stays as it is (it already falls back cleanly); the free-tier provider migration of spec §2.4/§2.5
+(`openai` package, Groq/Gemini/OpenRouter chains, quotas, privacy routing) is **deferred** until a key exists.
+`PRAMAAN_BUILD_SPEC.md` is now spec v2 (free-tier LLM section); §2.4 is the target, not yet the code.
+M2 consequence: no LLM form data and no frontier rerank — both use the deterministic path the spec defines.
+
+## D-011 · 2026-10-27 · Crawler (M2) choices
+- **Re-entry:** a state is reached again by opening its anchor URL and replaying a click chain. Any action that changes
+  server state (form submit, owned-record action) starts a new anchor at the resulting URL, so a mutation is never
+  replayed. A state that no longer exists after a later mutation is counted as `stale`, not as an error.
+- **Ordering:** frontier priority is unvisited route → nav landmark → submit → rest → owned-record actions last
+  (they change the state other candidates start from). Ties keep DOM order, so crawls are deterministic.
+- **Repeated rows:** only the first row of a repeated group and rows showing this run's tag become candidates. Row
+  candidates use a row-scoped descriptor (`getByTestId('leave-row').filter({hasText}).getByTestId(...)`), which adds an
+  optional `scope` to the locator descriptor (additive). In-page `#anchor` links and zero-size elements are skipped;
+  a bare `[data-testid]` is a candidate only if it is clickable and holds no other controls.
+- **Owned-record container:** nearest row/listitem, else dialog, else the enclosing section/article/form (so a detail
+  card showing the tag counts). The network ownership guard remains the backstop; an e2e test removes
+  cancel/approve/reject from the deny list and proves the guard aborts `POST /api/leaves/1/cancel`.
+- **Settling:** no fixed waits — an action is settled when no request is in flight across two animation frames
+  (bounded at 10 s). Long-polling apps will hit the bound on every action; revisit on HRMS if needed.
+- **Rate limit** applies to API traffic only (`limitWhen`, closes the D-006 note).
+- **Teardown ops** are learned from the crawl: a 2xx `DELETE …/{id}` or `POST …/{id}/cancel|withdraw|delete|remove`
+  on an owned record. A teardown call answered 409/410 means the record is already terminal → `retired`.
+- **Demo app:** approval rows gained a "View" link (realistic, and lets second-tenant approvers reach `/leaves/{id}`).

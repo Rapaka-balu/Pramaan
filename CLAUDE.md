@@ -33,6 +33,7 @@ Status: `docs/PROGRESS.md` · Decisions: `docs/DECISIONS.md` · Open asks: `docs
 - POM layers: pages/ flows/ specs/ fixtures/ helpers/ config/. Strict TS, no any. en_IN data, Asia/Kolkata.
 
 ## LLM
+- Keyless for now (D-010): PRAMAAN_LLM_MODE=off/replay-or-off, every call site uses its deterministic fallback.
 - Only src/llm/client.ts talks to the API. Modes: live | record | replay | off (tests: replay/off).
 - Models via env: PRAMAAN_MODEL_FRONTIER / _MID / _SMALL. Respect budgets in app.yaml.
 - Cite-only-given-evidence: drop any output citing unknown evidence ids.

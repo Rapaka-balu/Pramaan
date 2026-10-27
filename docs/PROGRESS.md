@@ -4,7 +4,8 @@
 | --- | --- | --- |
 | M0 — Scaffold, demo app, LLM client, guards | **done** (llm:smoke pending Balu's key) | 2026-10-08 |
 | M1 — Onboarding harness | **demo done**; HRMS staging run pending creds + OK | 2026-10-08 |
-| M2 — Crawler with HAR capture | next — waiting for "continue" | |
+| M2 — Crawler with HAR capture | **demo done**; HRMS staging crawl pending creds + OK | 2026-10-27 |
+| M3 — Living Spec inference | next — waiting for "continue" | |
 
 ## M0 — measured (2026-10-08)
 
@@ -32,3 +33,20 @@
 | HRMS without `--target` | all roles skipped, 0 network calls, exit 2 |
 | HRMS staging (employee + admin log in; employee2 / other-tenant "cannot verify") | **not run** — needs `.env` values and Balu's OK |
 | `npm run verify` | green: 19 unit files / 256 tests, 6 e2e tests |
+
+## M2 — measured (2026-10-27, demo, `DEMO_BUGS=none`, keyless)
+
+| Acceptance check | Result |
+| --- | --- |
+| ≥ 90% of demo routes discovered per role | **100% for all 6 roles**: employee/employee2/t2-employee 5/5, manager 6/6, admin/t2-admin 7/7 |
+| Crawl under 5 min per role | 2–5 s per role (8–10 states, 14–19 transitions each); whole 6-role crawl ≈ 40 s incl. login |
+| No mutating request reaches a non-owned leave (server log vs ledger) | **0** foreign mutations; seeded leave 1 stays `submitted` |
+| Owned-record cancel exercised | yes — crawl-created leaves cancelled in the UI (teardown then finds them `retired`) |
+| Network ownership guard in e2e (deny list with cancel/approve/reject removed) | guard aborted `POST /api/leaves/1/cancel`; 0 foreign mutations |
+| Teardown restores seed except terminal records | 8 created → 4 torn down + 4 retired, **0 orphaned**; all balances back to seed |
+| Punch in/out skipped and listed | never called; every role lists "Punch in, Punch out" as needing approval |
+| Determinism (two crawls of a reset demo) | identical state-key sets (employee, manager) |
+| HRMS crawl without `--target` | refused, 0 network calls, exit 2 |
+| HRMS staging crawl (state counts, 5 screenshot spot-checks) | **not run** — needs `.env` values and Balu's OK |
+| LLM requests | 0 (keyless mode, D-010) |
+| `npm run verify` | green: 23 unit files / 305 tests, 9 e2e tests |
