@@ -46,7 +46,7 @@ export interface CompileResult {
 const CrawlSummary = z.object({ learnedTeardown: z.record(z.string(), z.string()).default({}) }).loose();
 const ACTOR = 'pramaan:compile';
 
-function crawlStates(crawlDir: string): CrawlState[] {
+export function crawlStates(crawlDir: string): CrawlState[] {
   if (!existsSync(crawlDir)) return [];
   const out: CrawlState[] = [];
   for (const role of readdirSync(crawlDir).sort()) {
@@ -122,6 +122,7 @@ export async function runCompile(opts: CompileOptions): Promise<CompileResult> {
     ledgerEvents: events,
     specTexts,
     jsonpathSource: readFileSync(join(root, 'src', 'dsl', 'jsonpath.ts'), 'utf8'),
+    expectLintSource: readFileSync(join(root, 'src', 'maintain', 'expect-lint.ts'), 'utf8'),
   });
 
   const { mkdirSync } = await import('node:fs');

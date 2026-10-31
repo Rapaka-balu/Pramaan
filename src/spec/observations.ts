@@ -56,8 +56,9 @@ export function apiMatcher(apiBaseUrl: string | undefined, baseUrl: string): (ur
     } catch {
       return false;
     }
-    if (api) return u.origin === api.origin && u.pathname.startsWith(api.pathname.replace(/\/$/, ''));
-    return u.origin === origin && (u.pathname === '/api' || u.pathname.startsWith('/api/'));
+    // Host + path, not port: a crawl and a later compile may run the same local app on different ports.
+    if (api) return u.protocol === api.protocol && u.hostname === api.hostname && u.pathname.startsWith(api.pathname.replace(/\/$/, ''));
+    return u.hostname === new URL(origin).hostname && (u.pathname === '/api' || u.pathname.startsWith('/api/'));
   };
 }
 

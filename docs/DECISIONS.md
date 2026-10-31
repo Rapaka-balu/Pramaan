@@ -240,3 +240,30 @@ stays keyless (D-010); with the key, run `npm run llm:smoke`, then record demo f
   `number-plus-one` (a constant offset cancels); list/tenant faults only where a test reads list items / owner fields;
   (2) at run time — a mutant whose fault never changed a response the test received (fault log per test) is equivalent.
   First naive plan measured 45 % (body faults on authz tests made up most survivors); the oracle-aware plan 96 %.
+
+## D-019 · 2026-10-31 · Triage, heal and heal lint (M9) choices
+- **Classification order is the spec's**, deterministic: quarantined signature → mass failure (> 50 %) → flaky (the
+  original failure + ≥ 1 passing isolated rerun of 3) → locator drift (locator errors on the original and every rerun)
+  → environment (login, DNS, connection, 502/503/504) → spec change (404/405 on an operation the spec knows) → product
+  bug candidate. The mid LLM only writes a ≤ 3-line summary for the defect file (keyless: expected/received lines).
+- **Unavailable services fail loudly:** the suite's `call()` throws "environment: HTTP 503 GET …" on 502/503/504
+  instead of letting a later assertion fail on garbage (`NaN`), so triage can tell an outage from a defect.
+- **Reruns:** `--repeat-each=3 --workers=1` with quarantined tests included; Playwright lists each repeat as its own
+  entry, so the parser merges them per test.
+- **Quarantine** lives in the suite's `quarantine.json` (id, file, title, signature, since); `playwright.config.ts`
+  greps those titles out of the gating run unless `PRAMAAN_INCLUDE_QUARANTINED=1`. Never `test.skip`/`fixme`.
+- **Heal:** the dead locator comes from Playwright's call log; the getter that returns it is found with ts-morph; the
+  page is reopened read-only (ownership guard on, suite session preferred) and exactly one element must match by role +
+  accessible name, testid stem (`apply-leave-btn` ~ `apply-leave-submit`) or label. Only that return expression is
+  rewritten; the test is rerun; the heal lint runs; then a `pramaan/heal-<runId>` commit. Zero or several matches →
+  `heal.rejected`, queued for the lead. Getters on pages that need a record id are not healed automatically.
+- **Heal lint** has one source, `src/maintain/expect-lint.ts` (TypeScript AST): per test, fewer `expect()` calls, fewer
+  strong matchers or more weak ones, added skip/fixme/only or waitForTimeout, a removed test, or — in a heal — any file
+  outside `pages/`. `compile` transpiles it into the suite as `scripts/lint-expect-count.mjs` (`npm run lint:heal`):
+  the suite has no TypeScript runner, and one source keeps Pramaan's and the suite's rules identical.
+- **UI form tests:** for each create operation the crawl reached through a form, the suite gets a `@regression` test that
+  fills the form as the creating role and clicks its submit (via page objects), so a renamed control breaks a real test.
+- **API matcher** compares host + path, not port: a crawl and a later compile can run the same local app on different
+  ports (a compile without the crawl's port silently lost every HAR observation before this).
+- **Flaky scenario seed:** `DEMO_FLAKY=0.3 DEMO_SEED=21` (spec suggested 42; with 42 two tests failed all three
+  reruns and were — correctly — classified environment). The spec allows picking the seed for reproducibility.

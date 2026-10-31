@@ -7,6 +7,8 @@ export interface TestOutcome {
   title: string;
   ok: boolean;
   status: string; // last attempt: passed | failed | timedOut | skipped | interrupted
+  runs: number; // attempts across --repeat-each / retries
+  passes: number;
   errors: string[]; // messages, ANSI colours removed
   steps: string[]; // titles of failing steps, if any
   attachments: string[]; // paths (trace, screenshot)
@@ -47,6 +49,8 @@ export function parseResultsJson(json: unknown): TestOutcome[] {
         title: spec.title,
         ok: spec.ok,
         status: last?.status ?? 'unknown',
+        runs: results.length,
+        passes: results.filter((r) => r.status === 'passed').length,
         errors: [...new Set(errors)],
         steps: results.flatMap((r) => r.steps.filter((st) => st.error).map((st) => st.title)),
         attachments: results.flatMap((r) => r.attachments.map((a) => a.path ?? '')).filter(Boolean),
@@ -55,7 +59,15 @@ export function parseResultsJson(json: unknown): TestOutcome[] {
     for (const c of s.suites ?? []) walk(c);
   };
   for (const s of Report.parse(json).suites) walk(s);
-  return out;
+  // --repeat-each lists every repeat as its own entry: merge them per test.
+  const merged = new Map<string, TestOutcome>();
+  for (const o of out) {
+    const k = `${o.file}|${o.title}`;
+    const m = merged.get(k);
+    if (!m) merged.set(k, o);
+    else merged.set(k, { ...m, ok: m.ok && o.ok, status: o.status, runs: m.runs + o.runs, passes: m.passes + o.passes, errors: [...new Set([...m.errors, ...o.errors])], steps: [...m.steps, ...o.steps], attachments: [...m.attachments, ...o.attachments] });
+  }
+  return [...merged.values()];
 }
 
 export const parseResults = (path: string): TestOutcome[] => parseResultsJson(JSON.parse(readFileSync(path, 'utf8')) as unknown);

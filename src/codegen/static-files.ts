@@ -27,6 +27,7 @@ export function packageJson(appId: string): string {
         'test:regression': 'playwright test --grep @regression',
         'test:authz': 'playwright test --grep @authz',
         typecheck: 'tsc --noEmit',
+        'lint:heal': 'node scripts/lint-expect-count.mjs --base main',
         lint: 'eslint .',
       },
       devDependencies: Object.fromEntries(Object.entries(SUITE_DEPS).sort(([a], [b]) => a.localeCompare(b))),
@@ -61,7 +62,7 @@ export const TSCONFIG = `${JSON.stringify(
 
 export const GITIGNORE = ['node_modules/', '.auth/', 'test-results/', 'playwright-report/', 'allure-results/', 'allure-report/', '.pramaan-run/', 'results.json', '.env', ''].join('\n');
 
-export const PLAYWRIGHT_CONFIG = `import { readFileSync } from 'node:fs';
+export const PLAYWRIGHT_CONFIG = `import { existsSync, readFileSync } from 'node:fs';
 import { defineConfig } from '@playwright/test';
 import { app } from './config/app';
 import { baseUrl } from './config/env';
@@ -69,10 +70,16 @@ import { baseUrl } from './config/env';
 // PRAMAAN_GREP_FILE: a regex of test titles to run (set by pramaan mutate / bench; avoids long command lines).
 const grepFile = process.env['PRAMAAN_GREP_FILE'];
 
-// Quarantined test ids (M9) are excluded from the gating run; a separate job still runs them.
+// Quarantined tests (quarantine.json, written by pramaan triage) leave the gating run;
+// PRAMAAN_INCLUDE_QUARANTINED=1 (the quarantine job, and triage reruns) still runs them.
+const esc = (s: string): string => s.replace(/[.*+?^$(){}|[\\]\\\\]/g, '\\\\$&');
+const quarantine = existsSync('quarantine.json') ? (JSON.parse(readFileSync('quarantine.json', 'utf8')) as { tests: { title: string }[] }).tests.map((t) => t.title) : [];
+const skipQuarantined = quarantine.length > 0 && process.env['PRAMAAN_INCLUDE_QUARANTINED'] !== '1';
+
 export default defineConfig({
   testDir: './specs',
   ...(grepFile ? { grep: new RegExp(readFileSync(grepFile, 'utf8').trim()) } : {}),
+  ...(skipQuarantined ? { grepInvert: new RegExp(quarantine.map(esc).join('|')) } : {}),
   globalSetup: './fixtures/global-setup.ts',
   globalTeardown: './fixtures/global-teardown.ts',
   fullyParallel: false,
@@ -80,7 +87,7 @@ export default defineConfig({
   retries: 0, // flakiness is triaged, not retried away
   timeout: 60_000,
   reporter: [['json', { outputFile: 'results.json' }], ['allure-playwright'], ['list']],
-  use: { baseURL: baseUrl(), trace: 'retain-on-failure', screenshot: 'only-on-failure', testIdAttribute: 'data-testid' },
+  use: { baseURL: baseUrl(), actionTimeout: 10_000, trace: 'retain-on-failure', screenshot: 'only-on-failure', testIdAttribute: 'data-testid' },
   projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
   metadata: { app: app.id },
 });
@@ -162,7 +169,10 @@ export async function call(
   // Inert unless \`pramaan mutate\` set PRAMAAN_FAULT.
   const result = { status: res.status(), body };
   // Teardown passes noFault: an injected fault must never stop test data from being cleaned up.
-  return opts.noFault ? result : applyFault(method, path, result);
+  if (opts.noFault) return result;
+  // An unavailable service is an environment problem; say so instead of failing a later assertion on garbage.
+  if (result.status === 502 || result.status === 503 || result.status === 504) throw new Error('environment: HTTP ' + result.status + ' ' + method + ' ' + path + ' (service unavailable)');
+  return applyFault(method, path, result);
 }
 
 export const authFile = (role: string): string => join('.auth', \`\${role}.json\`);
@@ -269,6 +279,13 @@ export class Steward {
       return { ...res, id: String(id) };
     }
     return res;
+  }
+
+  /** Registers a record the UI created (e.g. by submitting a form), so it is torn down like any other. */
+  adopt(entity: string, rec: { actor: string; id: string }): void {
+    const r = { entity, id: rec.id, actor: rec.actor };
+    this.created.push(r);
+    appendRunEvent(this.runTag, { event: 'created', ...r });
   }
 
   /** Newest first; every outcome is written to the run ledger so the global teardown can finish the job. */
@@ -657,7 +674,8 @@ import tseslint from 'typescript-eslint';
 import pramaan from './eslint-rules/pramaan.mjs';
 
 export default tseslint.config(
-  { ignores: ['node_modules/', 'test-results/', 'playwright-report/', 'allure-results/', 'allure-report/'] },
+  // scripts/*.mjs are transpiled from Pramaan's own linted TypeScript.
+  { ignores: ['node_modules/', 'test-results/', 'playwright-report/', 'allure-results/', 'allure-report/', 'scripts/'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

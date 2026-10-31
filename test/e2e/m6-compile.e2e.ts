@@ -12,6 +12,11 @@ import { runCrawl } from '../../src/crawler/crawl.js';
 import { runOrphans } from '../../src/data/commands.js';
 import { runBench } from '../../src/bench/run.js';
 import { runMutate } from '../../src/mutation/runner.js';
+import { runTriage, Quarantine } from '../../src/triage/run.js';
+import { TestIndex } from '../../src/bench/run.js';
+import { gitChanges, lintChanges } from '../../src/maintain/expect-lint.js';
+import { workspaceDir } from '../../src/core/paths.js';
+import { Finding } from '../../src/core/schemas.js';
 import { startDemo } from '../../fixtures/demo-hrms/server.mjs';
 import { loadAssertions, saveAssertion } from '../../src/spec/assertion-proposer.js';
 import { runInfer } from '../../src/spec/infer.js';
@@ -154,4 +159,72 @@ test('should_kill_injected_faults_when_mutating_the_leave_balance_operation', as
   expect(res.report?.mutants ?? 0, 'mutants were planned and run').toBeGreaterThan(5);
   expect(res.report?.killRate ?? 0, `kill rate on the balance operation\n${res.summary}`).toBeGreaterThanOrEqual(0.7);
   expect(res.report?.baselineFailures, 'tests pass without faults').toEqual([]);
+});
+
+// ---------------------------------------------------------------- M9: triage, heal, quarantine
+
+async function triageAgainst(demoEnv: Record<string, string>): Promise<{ triage: Awaited<ReturnType<typeof runTriage>>; branchBefore: string }> {
+  const branchBefore = run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], repo).out.trim();
+  const demo = await startDemo({ port: 0, env: { ...process.env, DEMO_BUGS: 'none', ...demoEnv } });
+  try {
+    const env = { ...process.env, DEMO_PORT: String(demo.port) };
+    const res = await runSuite({ appId: 'demo', stateRoot: root, repoPath: repo, suite: 'regression', env });
+    const triage = await runTriage({ appId: 'demo', stateRoot: root, repoPath: repo, results: res.resultsPath ?? '', env });
+    console.log(triage.summary);
+    return { triage, branchBefore };
+  } finally {
+    await demo.close();
+  }
+}
+
+test('should_file_a_queued_confirmed_rule_finding_when_the_balance_is_off_by_one', async () => {
+  test.setTimeout(900_000);
+  // Act
+  const { triage } = await triageAgainst({ DEMO_BUGS: 'balance-off-by-one' });
+  // Assert
+  const bug = triage.items.find((i) => i.title.startsWith('should_deduct_exactly_the_requested_days'));
+  expect(bug?.cls, 'the deduction test failure is a product bug candidate').toBe('product-bug-candidate');
+  const finding = Finding.parse(JSON.parse(readFileSync(join(workspaceDir(root, 'demo', 'findings'), `${bug?.findingId ?? ''}.json`), 'utf8')));
+  expect(finding.oracle, 'found by the confirmed rule').toBe('confirmed-rule');
+  expect(finding.status, 'a fresh ledger has no precision record: queued, not auto-filed').toBe('queued');
+  expect(finding.evidence[0]?.excerpt ?? '', 'evidence quotes expected and received').toMatch(/Expected: -2[\s\S]*Received: -3/);
+  expect(triage.items.every((i) => i.cls === 'product-bug-candidate'), 'nothing else is wrong with this build').toBe(true);
+});
+
+test('should_quarantine_and_never_file_flaky_balance_tests_when_the_api_is_flaky', async () => {
+  test.setTimeout(900_000);
+  // Act (DEMO_SEED=21 makes the 503 pattern reproducible; every affected test passes at least one rerun)
+  const { triage, branchBefore } = await triageAgainst({ DEMO_FLAKY: '0.3', DEMO_SEED: '21' });
+  try {
+    // Assert
+    expect(triage.items.length, 'the flaky API makes some tests fail').toBeGreaterThan(0);
+    expect(triage.items.map((i) => i.cls).filter((c) => c !== 'flaky'), `every failure is flaky\n${triage.summary}`).toEqual([]);
+    expect(triage.items.filter((i) => i.findingId), 'flaky tests are never filed').toEqual([]);
+    const q = Quarantine.parse(JSON.parse(readFileSync(join(repo, 'quarantine.json'), 'utf8')));
+    expect(q.tests.map((t) => t.title).sort(), 'all of them are quarantined').toEqual(triage.items.map((i) => i.title).sort());
+    const index = TestIndex.parse(JSON.parse(readFileSync(join(repo, 'spec', 'test-index.json'), 'utf8'))).tests;
+    for (const i of triage.items) {
+      const ops = index.find((e) => e.title === i.title)?.operations ?? [];
+      expect(ops, `${i.title} reads the flaky /api/leave-balance`).toContain('GET /api/leave-balance');
+    }
+  } finally {
+    run('git', ['checkout', '-q', branchBefore], repo);
+  }
+});
+
+test('should_heal_only_the_page_object_when_the_apply_button_testid_drifts', async () => {
+  test.setTimeout(900_000);
+  // Act
+  const { triage, branchBefore } = await triageAgainst({ DEMO_DRIFT: 'apply-testid' });
+  try {
+    // Assert
+    expect(triage.items.map((i) => i.cls), triage.summary).toEqual(['locator-drift']);
+    expect(triage.items[0]?.action ?? '', 'healed, re-run green, lint ok').toMatch(/^healed pages\/LeavesApplyPage\.ts .*"apply-leave-btn".*"apply-leave-submit".*test passes, lint ok$/);
+    const changed = run('git', ['diff', '--name-only', `${branchBefore}...HEAD`], repo).out.split('\n').filter(Boolean);
+    expect(changed, 'the heal commit touches pages/ only').toEqual(['pages/LeavesApplyPage.ts']);
+    expect(lintChanges(gitChanges(repo, branchBefore), { healPr: true }), 'the suite heal lint passes on the heal branch').toEqual([]);
+    expect(new Ledger({ root, app: 'demo' }).query({ type: 'heal.applied' }).length, 'heal.applied is in the ledger').toBeGreaterThan(0);
+  } finally {
+    run('git', ['checkout', '-q', branchBefore], repo);
+  }
 });

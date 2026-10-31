@@ -11,7 +11,8 @@
 | M6 — Compiler: the suite repo | **demo done**; first HRMS suite + Balu review pending | 2026-10-31 |
 | M7 — Data Steward hardening | **demo done**; HRMS orphan/irreversible-op counts pending staging | 2026-10-31 |
 | M8 — Benchmark and mutation self-check | **demo done**; HRMS bench needs 30 seeded bugs from Balu + devs | 2026-10-31 |
-| M9 — Triage, locator-only heal, expect-count lint | next | |
+| M9 — Triage, locator-only heal, expect-count lint | **demo done** | 2026-10-31 |
+| M10 — Charter agents, lead console, digest, closure report, MVP gate | next | |
 
 ## M0 — measured (2026-10-08)
 
@@ -129,3 +130,14 @@
 | Surviving mutants | 6, all on `POST /api/leaves` in tests that expect the create to be refused |
 | Time | bench 2.8 min (15 suite runs), mutate 8.3 min (40 suite runs); 0 LLM requests |
 | HRMS bench in manual activation mode with ≥ 1 real seeded bug | harness built + unit-tested (manual prompt); **needs a bug deployed on staging** |
+
+## M9 — measured (2026-10-31, demo, keyless)
+
+| Acceptance check | Result |
+| --- | --- |
+| `DEMO_DRIFT=apply-testid` | 1 failure → **locator-drift**; heal changed only `pages/LeavesApplyPage.ts`: `getByTestId("apply-leave-btn")` → `getByTestId("apply-leave-submit")` (same role + accessible name); the test passes; heal lint passes; `heal.applied` in the ledger |
+| A crafted heal that weakens an assertion | blocked by the lint (unit: `toBe` → `toBeTruthy` reports "weakened its matchers"; a spec file in a heal reports "may only change pages/") |
+| `DEMO_FLAKY=0.3 DEMO_SEED=21` | 6 failing tests, all reading `/api/leave-balance`: **6/6 flaky**, all quarantined in `quarantine.json`, **0 filed** |
+| `DEMO_BUGS=balance-off-by-one` | finding with oracle **confirmed-rule**, evidence "Expected: -2 / Received: -3", status **queued** (fresh ledger: no precision record, so no auto-filing) |
+| Signatures stable across runs (numbers, ids, dates, run tag, ports normalized) | unit-tested |
+| Precision gate (≥ 20 verdicts, ≥ 95 %, last 50, shadow mode) | unit-tested |

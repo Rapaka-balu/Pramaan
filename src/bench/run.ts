@@ -16,7 +16,7 @@ import { activate, freePort } from './target.js';
 
 export const TestIndex = z.object({
   tests: z.array(
-    z.object({ file: z.string(), title: z.string(), tags: z.array(z.string()), oracle: z.string(), operations: z.array(z.string()), reads: z.record(z.string(), z.array(z.string())).default({}) }).loose(),
+    z.object({ file: z.string(), title: z.string(), tags: z.array(z.string()), oracle: z.string(), operations: z.array(z.string()), reads: z.record(z.string(), z.array(z.string())).default({}), ruleIds: z.array(z.string()).default([]) }).loose(),
   ),
 });
 export type IndexEntry = z.infer<typeof TestIndex>['tests'][number];

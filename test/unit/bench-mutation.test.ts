@@ -10,6 +10,7 @@ const entry = (title: string, x: Partial<IndexEntry> = {}): IndexEntry => ({
   oracle: 'confirmed-rule',
   operations: [],
   reads: {},
+  ruleIds: [],
   ...x,
 });
 

@@ -13,6 +13,7 @@ import { runOrphans, runSeed, runTeardown } from '../data/commands.js';
 import { runOnboard } from '../onboarding/onboard.js';
 import { exportReview, importReview, inquirerPrompter, queueSummary, runInteractiveReview } from '../lead/review.js';
 import { runInfer } from '../spec/infer.js';
+import { runTriage } from '../triage/run.js';
 import { formatDoctor, runDoctor } from './doctor.js';
 
 const program = new Command();
@@ -200,6 +201,21 @@ program
   .option('--repo <path>', 'override output.repoPath')
   .action(async (opts: { app: string; target?: 'staging'; ops?: string; repo?: string }) => {
     const res = await runMutate({ appId: opts.app, stateRoot: stateRoot(), target: opts.target, ...(opts.ops ? { ops: opts.ops.split(',').map((o) => o.trim()) } : {}), ...(opts.repo ? { repoPath: opts.repo } : {}) });
+    console.log(res.summary);
+    process.exitCode = res.exitCode;
+  });
+
+program
+  .command('triage')
+  .description('classify failures (bug / flaky / locator drift / environment / spec change); quarantine, heal or file')
+  .requiredOption('--app <id>', 'app id under apps/')
+  .requiredOption('--results <path>', 'a results.json, or a directory of CI results artifacts')
+  .addOption(targetOption())
+  .option('--repo <path>', 'override output.repoPath')
+  .option('--no-rerun', 'classify without isolated reruns')
+  .option('--no-heal', 'do not patch page objects for locator drift')
+  .action(async (opts: { app: string; results: string; target?: 'staging'; repo?: string; rerun: boolean; heal: boolean }) => {
+    const res = await runTriage({ appId: opts.app, stateRoot: stateRoot(), results: opts.results, target: opts.target, rerun: opts.rerun, heal: opts.heal, ...(opts.repo ? { repoPath: opts.repo } : {}) });
     console.log(res.summary);
     process.exitCode = res.exitCode;
   });
