@@ -4,6 +4,8 @@ import { Command, Option } from 'commander';
 import { repoRoot } from '../core/config.js';
 import { stateRoot } from '../core/paths.js';
 import { runAuthz } from '../authz/run.js';
+import { runCompile } from '../codegen/compile.js';
+import { runSuite } from '../codegen/run-suite.js';
 import { runCrawl } from '../crawler/crawl.js';
 import { runOnboard } from '../onboarding/onboard.js';
 import { exportReview, importReview, inquirerPrompter, queueSummary, runInteractiveReview } from '../lead/review.js';
@@ -109,6 +111,31 @@ program
     } else {
       console.log(queueSummary(base));
     }
+  });
+
+program
+  .command('compile')
+  .description('write the suite repo (Playwright + TypeScript, no LLM) from the Living Spec and confirmed decisions')
+  .requiredOption('--app <id>', 'app id under apps/')
+  .option('--repo <path>', 'override output.repoPath')
+  .option('--no-install', 'do not run npm install in the suite')
+  .action(async (opts: { app: string; repo?: string; install: boolean }) => {
+    const res = await runCompile({ appId: opts.app, stateRoot: stateRoot(), install: opts.install, ...(opts.repo ? { repoPath: opts.repo } : {}) });
+    console.log(res.summary);
+    process.exitCode = res.exitCode;
+  });
+
+program
+  .command('run')
+  .description('run the suite repo and collect results.json (zero LLM calls)')
+  .requiredOption('--app <id>', 'app id under apps/')
+  .addOption(targetOption())
+  .addOption(new Option('--suite <name>', 'tag to run').choices(['smoke', 'regression', 'authz', 'all']).default('regression'))
+  .option('--repo <path>', 'override output.repoPath')
+  .action(async (opts: { app: string; target?: 'staging'; suite: 'smoke' | 'regression' | 'authz' | 'all'; repo?: string }) => {
+    const res = await runSuite({ appId: opts.app, stateRoot: stateRoot(), suite: opts.suite, target: opts.target, ...(opts.repo ? { repoPath: opts.repo } : {}) });
+    console.log(res.summary);
+    process.exitCode = res.exitCode;
   });
 
 program.parseAsync(process.argv).catch((err: unknown) => {

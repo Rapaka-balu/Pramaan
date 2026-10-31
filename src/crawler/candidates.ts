@@ -253,9 +253,14 @@ export async function enumerate(page: Page, runTag: string): Promise<Enumerated>
         if (firstRowSeen.has(groupKey)) continue;
         firstRowSeen.add(groupKey);
       }
-      const inner = ladder({ ...facts, id: undefined });
-      const scoped = rowScope(el.row).flatMap((scope) => inner.map((d) => ({ ...d, scope })));
-      descriptor = await unique(page, scoped);
+      // A plain locator that is already unique wins (nav list items are "rows" too); scope to the row only when
+      // the element repeats across rows (a "View" link in every table row).
+      descriptor = await unique(page, ladder(facts));
+      if (!descriptor) {
+        const inner = ladder({ ...facts, id: undefined });
+        const scoped = rowScope(el.row).flatMap((scope) => inner.map((d) => ({ ...d, scope })));
+        descriptor = await unique(page, scoped);
+      }
     } else {
       descriptor = await unique(page, ladder(facts));
     }
@@ -329,5 +334,24 @@ export async function validationMessages(page: Page): Promise<string[]> {
       if (msg && (el as HTMLInputElement).willValidate && !(el as HTMLInputElement).checkValidity()) out.add(norm(msg));
     }
     return [...out].slice(0, 20);
+  });
+}
+
+export const TextElement = z.object({ testid: z.string(), text: z.string() });
+export type TextElement = z.infer<typeof TextElement>;
+
+/** Visible, non-interactive [data-testid] elements with short text: what a screen *shows* (balances, statuses). */
+export async function textElements(page: Page): Promise<TextElement[]> {
+  return page.evaluate(() => {
+    const out: { testid: string; text: string }[] = [];
+    for (const el of Array.from(document.querySelectorAll('[data-testid]'))) {
+      if (el.matches('a, button, input, select, textarea, table, tr, form')) continue;
+      if (el.querySelector('a, button, input, select, textarea')) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      const text = (el instanceof HTMLElement ? el.innerText : (el.textContent ?? '')).replace(/\s+/g, ' ').trim();
+      if (text !== '' && text.length <= 60) out.push({ testid: el.getAttribute('data-testid') ?? '', text });
+    }
+    return out;
   });
 }

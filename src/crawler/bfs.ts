@@ -10,7 +10,7 @@ import type { AppConfig } from '../core/schemas.js';
 import type { TargetGuard } from '../core/target-guard.js';
 import { entityFromPath, parseCreatedId, teardownOpFrom, type Steward } from '../data/steward.js';
 import { LOGIN_PATH_RE } from '../onboarding/auth-material.js';
-import { enumerate, validationMessages, type Candidate, type FormInfo } from './candidates.js';
+import { enumerate, textElements, validationMessages, type Candidate, type FormInfo } from './candidates.js';
 import { runFaker, valueFor } from './form-fill.js';
 import { Frontier, type FrontierItem } from './frontier.js';
 import { locatorFor, type LocatorDescriptor } from './locator.js';
@@ -260,6 +260,7 @@ export async function crawlRole(o: CrawlRoleOptions): Promise<RoleCrawlSummary> 
     const withVerdict = candidates.map((c) => ({ ...c, verdict: verdictFor(c).kind }));
     writeFileSync(join(dir, 'candidates.json'), JSON.stringify(withVerdict, null, 2));
     writeFileSync(join(dir, 'forms.json'), JSON.stringify(forms, null, 2));
+    writeFileSync(join(dir, 'texts.json'), JSON.stringify(await textElements(page), null, 2));
     writeFileSync(join(dir, 'console.json'), JSON.stringify(consoleBuf, null, 2));
     consoleBuf = [];
 

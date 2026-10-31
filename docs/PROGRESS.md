@@ -8,7 +8,8 @@
 | M3 — Living Spec inference | **demo done**; HRMS docs score pending staging | 2026-10-31 |
 | M4 — Authorization differential matrix | **demo done**; HRMS matrix pending staging | 2026-10-31 |
 | M5 — Rule proposer, seed rules, review queue v0 | **demo done**; HRMS first review session pending | 2026-10-31 |
-| M6 — Compiler: the suite repo | next | |
+| M6 — Compiler: the suite repo | **demo done**; first HRMS suite + Balu review pending | 2026-10-31 |
+| M7 — Data Steward hardening | next | |
 
 ## M0 — measured (2026-10-08)
 
@@ -89,3 +90,17 @@
 | DSL runtime unit cases (§10.1 invalid + corrected A-012, JSONPath, expressions, refs, runner) | 73 cases; invalid A-012 → "assert[1]: expected a Check, got a Step — move balAfter to act" |
 | HRMS: Balu's first real review session (minutes, confirm/reject counts) | **not run** — needs the HRMS crawl/infer on staging first |
 | `npm run verify` | green: 28 unit files / 429 tests, 13 e2e tests |
+
+## M6 — measured (2026-10-31, demo, keyless)
+
+| Acceptance check | Result |
+| --- | --- |
+| `pramaan compile` then `npm ci && npx playwright test` on `DEMO_BUGS=none` | **70 / 70 pass** (6 smoke, 8 rule assertions, 52 authz-matrix cells, 4 UI↔API consistency); suite typecheck + lint clean |
+| LLM-free: package.json + lockfile | no `openai` / `@anthropic-ai/sdk` |
+| LLM-free: code search `openai|anthropic|generativelanguage|groq|openrouter|11434` | 0 files |
+| LLM-free: `llm.call` during compile | 0 uncached calls |
+| `DEMO_BUGS=stale-ui-balance` | consistency tests fail, **only** consistency tests fail; pass on `none` |
+| Custom lint rules reject a bad file each | 8 unit cases (wait, 4 fragile locators, missing message, 2 bad titles) |
+| Regenerating twice without input changes | 0 files written, no branch, clean `git status` |
+| Authz matrix spec on the 3 authz bugs | fails for employee2 → leave by id, employee → /api/employees, other-tenant t2-admin → leaves?all; passes on `none` |
+| HRMS: first compiled suite as a PR + Balu's review minutes | **not run** — needs staging |
