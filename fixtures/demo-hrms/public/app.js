@@ -206,13 +206,17 @@
   }
 
   async function renderLeaves(user, flashText) {
+    // Approvers can switch to every leave request in their organisation (?scope=all → /api/leaves?all=1).
+    const all = isApprover(user) && new URLSearchParams(location.search).get('scope') === 'all';
     const view = cloneTemplate('tpl-leaves');
-    mount(view, 'My leaves');
+    if (all) view.querySelector('#leaves-heading').textContent = 'All leave requests';
+    view.querySelector('#all-leaves-link').hidden = !isApprover(user) || all;
+    mount(view, all ? 'All leave requests' : 'My leaves');
     if (flashText) showFlash(flashText);
 
     document.getElementById('export-csv').addEventListener('click', exportCsv);
 
-    const result = await api('/api/leaves');
+    const result = await api(all ? '/api/leaves?all=1' : '/api/leaves');
     if (!result.ok) {
       showFlash(errorText(result));
       return;
@@ -472,7 +476,7 @@
     if (url.origin !== location.origin) return;
     if (url.hash && url.pathname === location.pathname) return; // in-page anchor (skip link)
     event.preventDefault();
-    navigate(url.pathname);
+    navigate(url.pathname + url.search);
   });
 
   document.getElementById('logout').addEventListener('click', async () => {

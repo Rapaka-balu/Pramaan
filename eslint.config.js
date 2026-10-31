@@ -50,7 +50,7 @@ export default tseslint.config(
       globals: {
         window: 'readonly', document: 'readonly', localStorage: 'readonly', fetch: 'readonly',
         console: 'readonly', process: 'readonly', URL: 'readonly', setTimeout: 'readonly',
-        Blob: 'readonly', location: 'readonly', history: 'readonly', Buffer: 'readonly',
+        Blob: 'readonly', location: 'readonly', history: 'readonly', Buffer: 'readonly', URLSearchParams: 'readonly',
       },
     },
   },

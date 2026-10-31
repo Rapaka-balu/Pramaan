@@ -6,7 +6,8 @@
 | M1 — Onboarding harness | **demo done**; HRMS staging run pending creds + OK | 2026-10-08 |
 | M2 — Crawler with HAR capture | **demo done**; HRMS staging crawl pending creds + OK | 2026-10-27 |
 | M3 — Living Spec inference | **demo done**; HRMS docs score pending staging | 2026-10-31 |
-| M4 — Authorization differential matrix | next | |
+| M4 — Authorization differential matrix | **demo done**; HRMS matrix pending staging | 2026-10-31 |
+| M5 — Rule proposer, seed rules, review queue v0 | next | |
 
 ## M0 — measured (2026-10-08)
 
@@ -63,3 +64,15 @@
 | HRMS route precision ≥ 90% vs /apidocs | **not run** — needs staging (`score-vs-docs` is built and unit-tested) |
 | LLM requests | 0 (entity names from path roots) |
 | `npm run verify` | green: 25 unit files / 330 tests, 10 e2e tests |
+
+## M4 — measured (2026-10-31, demo, keyless)
+
+| Acceptance check | Result |
+| --- | --- |
+| `DEMO_BUGS=none`, matrix confirmed by scripted review → authz findings | **0** (12 rows, 72 cells: denied 37 · same-data 6 · different-data 23 · error 0 · skipped 6) |
+| `DEMO_BUGS=idor-leave-read,employee-admin-endpoint,cross-tenant-list` | **3 of 3 found**, 5 findings, 0 false: employee2 → `GET /api/leaves/{id}` (own-only); employee, employee2, manager → `GET /api/employees` (deny); other-tenant:t2-admin → `GET /api/leaves?all` (filtered, S1) |
+| Replay never mutates a record outside the teardown ledger | 0 foreign mutations (server log vs ledger); 18 replay records → 17 torn down + 1 retired, 0 orphans |
+| Clean demo raises no lead questions | 0 contradictions on proposed rows |
+| Skipped cells | 6 (create operation `POST /api/leaves`, not replayed by design) |
+| HRMS matrix rows / skipped cells | **not run** — needs staging |
+| `npm run verify` | green: 26 unit files / 345 tests, 12 e2e tests |

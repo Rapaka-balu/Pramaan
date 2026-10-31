@@ -2,10 +2,10 @@
 // confirms multi-role transitions; HRMS docs are used for scoring only. Output: workspace/<app>/spec/.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { chromium, type Browser } from '@playwright/test';
 import { stringify as toYaml } from 'yaml';
 import { z } from 'zod';
 import { loadAppConfig, repoRoot } from '../core/config.js';
+import type { AppConfig } from '../core/schemas.js';
 import { Ledger } from '../core/ledger.js';
 import { createHttp } from '../core/net.js';
 import { workspaceDir } from '../core/paths.js';
@@ -14,8 +14,9 @@ import { newRunId, runTag } from '../core/run-id.js';
 import { createTargetGuard } from '../core/target-guard.js';
 import { Candidate } from '../crawler/candidates.js';
 import { normalizeRoute } from '../crawler/state-key.js';
-import { checkRoles, networkAllowed } from '../onboarding/contract.js';
-import { ensureSession, loadAuthMaterial, type SessionDeps } from '../onboarding/sessions.js';
+import { networkAllowed } from '../onboarding/contract.js';
+import { ensureRoleSessions } from '../onboarding/ready.js';
+import { loadAuthMaterial } from '../onboarding/sessions.js';
 import { inferEntities, type Entity } from './entities.js';
 import { buildApiModel, toOpenApi } from './har-to-openapi.js';
 import { runLifecycleProbe, type ProbeResult } from './lifecycle-probe.js';
@@ -64,9 +65,28 @@ function crawlStates(crawlDir: string, role: string): { role: string; route: str
   });
 }
 
+/** Crawl HAR observations plus Pramaan's own replay observations (lifecycle probe), oldest first. */
+export function collectObservations(stateRoot: string, config: AppConfig): { observations: Observation[]; roles: string[] } {
+  const crawlDir = workspaceDir(stateRoot, config.id, 'crawl');
+  const isApi = apiMatcher(config.apiBaseUrl, config.baseUrl);
+  const roles = existsSync(crawlDir) ? readdirSync(crawlDir).filter((r) => existsSync(join(crawlDir, r, 'crawl.har'))).sort() : [];
+  const observations = roles.flatMap((role) => observationsFromHar(join(crawlDir, role, 'crawl.har'), role, `crawl/${role}/crawl.har`, isApi));
+  const replayDir = workspaceDir(stateRoot, config.id, 'spec', 'replay');
+  if (existsSync(replayDir)) {
+    for (const f of readdirSync(replayDir).filter((x) => x.startsWith('lifecycle-')).sort()) {
+      observations.push(...ReplayFile.parse(JSON.parse(readFileSync(join(replayDir, f), 'utf8'))));
+    }
+  }
+  return { observations: observations.sort((a, b) => a.ts - b.ts), roles };
+}
+
+const ReplayFile = z.array(
+  z.object({ role: z.string(), method: z.string(), url: z.string(), path: z.string(), query: z.array(z.string()), status: z.number(), reqBody: z.unknown().optional(), resBody: z.unknown().optional(), location: z.string().optional(), ts: z.number(), ref: z.string() }),
+).transform((xs) => xs as Observation[]);
+
 export async function runInfer(opts: InferOptions): Promise<InferResult> {
   const loaded = loadAppConfig(opts.appId, opts.env ? { root: repoRoot(), env: opts.env } : { root: repoRoot() });
-  const { config, env } = loaded;
+  const { config } = loaded;
   const runId = newRunId();
   const ledger = new Ledger({ root: opts.stateRoot, app: config.id });
   ledger.append({ runId, type: 'run.started', actor: ACTOR, data: { command: 'infer' } });
@@ -115,22 +135,8 @@ export async function runInfer(opts: InferOptions): Promise<InferResult> {
   const http = createHttp({ guard, limiter: createRateLimiter(config.safety.maxReplayRps), timeoutMs: 15_000 });
   if (allowed && opts.probe !== false) {
     const primary = config.tenants[0]?.id;
-    const ready = checkRoles(loaded).filter((r) => r.status === 'ready' && r.tenant === primary);
-    let browser: Browser | undefined;
-    const roles: string[] = [];
-    try {
-      for (const r of ready) {
-        const role = config.roles.find((x) => x.id === r.role);
-        const tenant = config.tenants.find((t) => t.id === r.tenant);
-        if (!role || !tenant) continue;
-        browser ??= await chromium.launch();
-        const deps: SessionDeps = { root: opts.stateRoot, config, browser, http, guard, limiter: createRateLimiter(config.safety.maxRps), onBlocked: () => undefined };
-        const s = await ensureSession(deps, { role: r.role, tenantCode: env[tenant.codeEnv], username: env[role.usernameEnv] ?? '', password: env[role.passwordEnv] ?? '' }).catch(() => undefined);
-        if (s && s.status !== 'failed') roles.push(r.role);
-      }
-    } finally {
-      await browser?.close();
-    }
+    const { ready } = await ensureRoleSessions(loaded, { stateRoot: opts.stateRoot, http, guard, tenants: primary ? [primary] : [] });
+    const roles = ready.map((r) => r.role);
     const probeObs: Observation[] = [];
     const missing = new Set<string>();
     for (const e of entities) {

@@ -126,3 +126,26 @@ stays keyless (D-010); with the key, run `npm run llm:smoke`, then record demo f
   (UI roles → creator → others, max 4). 404/405 for the owner = the op does not exist. Every write passes
   `decideOwnership` first; all records are torn down. Replay evidence: `spec/replay/lifecycle-<runId>.json`.
 - **Login:** session reuse means crawl HARs rarely contain the login call; it is excluded from entities anyway.
+
+## D-014 · 2026-10-31 · Authorization matrix (M4) choices
+- **Similarity = containment, not Jaccard.** The share of the owner's (path=valueHash) pairs the actor also gets.
+  Jaccard scores a superset leak (cross-tenant list = owner's rows + own rows) ≈ 0.8 and misses it; containment
+  scores 1.0. Array indices, timestamp keys/values and run-tagged strings are ignored. For collections only
+  identifying fields (id, *Id, email, tenant, name, reason…) count, so look-alike numbers (two people with 20 days
+  of leave) are not a leak. `same-data` ≥ 0.9.
+- **Mutations** classify by status: 2xx = same-data (the action worked as for the owner), 401/403/404 = denied,
+  other 4xx/5xx = error. Each actor gets a fresh record created by this run and driven along observed transitions
+  to the state where the owner's call was legal; creates are not replayed (cells `skipped`).
+- **Expectation semantics:** `filtered` is satisfied by `different-data` *or* `denied` (no owner data leaks either
+  way); `deny`/`own-only` need `denied`; `allow` needs `same-data`. §10.3's codegen must use these sets (M6).
+- **Heuristic proposals (keyless):** anonymous → deny (except public auth paths); other-tenant → deny on records and
+  writes, filtered on collections; admin|employees|settings|tenant|payroll paths → deny for non-admin roles; record
+  reads → own-only for plain roles, allow for privileged ones (role id ~ admin|manager|hr|lead|approver|owner);
+  writes → deny for plain roles; anything else `unknown` (never judged).
+- **Query variants are separate rows:** `GET /api/leaves` and `GET /api/leaves?all` (keys only; the baseline URL keeps
+  values). M8 hit-matching strips the `?…` part when comparing with bug catalog operations.
+- **Findings** are written to `workspace/<app>/findings/F-xxxx.json`, signature = sha1(oracle|operation|actor|
+  expected|outcome), re-seen findings only update `lastSeenRunId`. Status `queued` until the class has a precision
+  record (§4.7). S1 for other-tenant/anonymous leaks, S2 otherwise.
+- **Demo app:** approvers get an "All leave requests" view (`/leaves?scope=all` → `GET /api/leaves?all=1`), the realistic
+  screen through which `cross-tenant-list` becomes reachable; before it, no UI called that endpoint.

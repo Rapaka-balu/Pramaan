@@ -3,6 +3,7 @@
 import { Command, Option } from 'commander';
 import { repoRoot } from '../core/config.js';
 import { stateRoot } from '../core/paths.js';
+import { runAuthz } from '../authz/run.js';
 import { runCrawl } from '../crawler/crawl.js';
 import { runOnboard } from '../onboarding/onboard.js';
 import { runInfer } from '../spec/infer.js';
@@ -69,6 +70,17 @@ program
   .option('--no-probe', 'skip the lifecycle probe (no network calls)')
   .action(async (opts: { app: string; target?: 'staging'; probe: boolean }) => {
     const res = await runInfer({ appId: opts.app, stateRoot: stateRoot(), target: opts.target, probe: opts.probe });
+    console.log(res.summary);
+    process.exitCode = res.exitCode;
+  });
+
+program
+  .command('authz')
+  .description('differential authorization replay; updates the observed side of the role matrix')
+  .requiredOption('--app <id>', 'app id under apps/')
+  .addOption(targetOption())
+  .action(async (opts: { app: string; target?: 'staging' }) => {
+    const res = await runAuthz({ appId: opts.app, stateRoot: stateRoot(), target: opts.target });
     console.log(res.summary);
     process.exitCode = res.exitCode;
   });
