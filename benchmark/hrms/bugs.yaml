@@ -1,0 +1,14 @@
+# Seeded bugs for the HRMS pilot (spec §8 M8). Balu + devs fill this in: 30 bugs —
+# 8 calculation, 8 authz/tenant, 7 validation, 7 UI/workflow. `pramaan bench --app hrms --target staging`
+# pauses before each one and shows `activation.manual`; deploy the bug, press Enter, and Pramaan runs the suite.
+# expectedOracle: authz-matrix | confirmed-rule | charter-candidate | consistency | implicit
+# operations: the real route templates, as in spec/openapi.observed.yaml (e.g. "POST /api/attendance/regularize").
+schemaVersion: 1
+bugs: []
+# Example (copy, uncomment, adapt):
+#  - id: B01-grace-third-late
+#    category: calculation
+#    activation: { manual: "Deploy branch qa/B01 (grace deduction fires on the 3rd late instead of the 4th) to staging" }
+#    expectedOracle: confirmed-rule
+#    operations: ["GET /api/attendance/summary"]
+#    mvp: true

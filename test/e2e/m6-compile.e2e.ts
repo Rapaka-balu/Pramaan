@@ -10,6 +10,8 @@ import { run } from '../../src/codegen/writer.js';
 import { Ledger } from '../../src/core/ledger.js';
 import { runCrawl } from '../../src/crawler/crawl.js';
 import { runOrphans } from '../../src/data/commands.js';
+import { runBench } from '../../src/bench/run.js';
+import { runMutate } from '../../src/mutation/runner.js';
 import { startDemo } from '../../fixtures/demo-hrms/server.mjs';
 import { loadAssertions, saveAssertion } from '../../src/spec/assertion-proposer.js';
 import { runInfer } from '../../src/spec/infer.js';
@@ -128,4 +130,28 @@ test('should_fail_the_authz_matrix_spec_when_the_three_authz_bugs_are_on', async
   } finally {
     await demo.close();
   }
+});
+
+test('should_detect_seeded_bugs_without_false_alarms_when_benchmarking_the_suite', async () => {
+  test.setTimeout(900_000);
+  // Act: a short bench (the full 14-bug bench is `pramaan bench --app demo`, measured in PROGRESS.md)
+  const res = await runBench({ appId: 'demo', stateRoot: root, repoPath: repo, bugs: ['balance-off-by-one', 'idor-leave-read', 'stale-ui-balance'] });
+  console.log(res.summary);
+  // Assert
+  expect(res.exitCode, res.summary).toBe(0);
+  expect(res.report?.falseAlarmsOnNone, 'no failure at all on DEMO_BUGS=none').toBe(0);
+  expect(res.report?.runs.filter((r) => r.bug !== 'none' && !r.detected).map((r) => r.bug), 'every bug in this subset is caught by its expected oracle').toEqual([]);
+  expect(new Ledger({ root, app: 'demo' }).query({ type: 'bench.result' }).length, 'the bench result is in the ledger').toBeGreaterThan(0);
+});
+
+test('should_kill_injected_faults_when_mutating_the_leave_balance_operation', async () => {
+  test.setTimeout(900_000);
+  // Act: one operation's faults (the full run is `pramaan mutate --app demo`)
+  const res = await runMutate({ appId: 'demo', stateRoot: root, repoPath: repo, ops: ['GET /api/leave-balance'] });
+  console.log(res.summary);
+  // Assert
+  expect(res.exitCode, res.summary).toBe(0);
+  expect(res.report?.mutants ?? 0, 'mutants were planned and run').toBeGreaterThan(5);
+  expect(res.report?.killRate ?? 0, `kill rate on the balance operation\n${res.summary}`).toBeGreaterThanOrEqual(0.7);
+  expect(res.report?.baselineFailures, 'tests pass without faults').toEqual([]);
 });

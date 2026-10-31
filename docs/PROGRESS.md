@@ -10,7 +10,8 @@
 | M5 — Rule proposer, seed rules, review queue v0 | **demo done**; HRMS first review session pending | 2026-10-31 |
 | M6 — Compiler: the suite repo | **demo done**; first HRMS suite + Balu review pending | 2026-10-31 |
 | M7 — Data Steward hardening | **demo done**; HRMS orphan/irreversible-op counts pending staging | 2026-10-31 |
-| M8 — Benchmark and mutation self-check | next | |
+| M8 — Benchmark and mutation self-check | **demo done**; HRMS bench needs 30 seeded bugs from Balu + devs | 2026-10-31 |
+| M9 — Triage, locator-only heal, expect-count lint | next | |
 
 ## M0 — measured (2026-10-08)
 
@@ -115,3 +116,16 @@
 | Seed → orphans → teardown | 3 seeded leaves found live by tag, then 0 live / 3 retired after teardown |
 | en_IN factories | PAN format-valid with a never-issued holder type (50/50), Aadhaar Verhoeff-invalid (50/50), +91 mobiles |
 | HRMS: orphan counts, irreversible operations, Balu's policy per operation | **not run** — needs staging |
+
+## M8 — measured (2026-10-31, demo, keyless)
+
+| Acceptance check | Result |
+| --- | --- |
+| Demo bench recall (14 MVP bugs) | **86 % (12/14)** — target ≥ 60 %. authz 2/2, tenant-isolation 1/1, workflow 2/2, calculation 3/4, validation 2/2, consistency 1/1, implicit 1/2 |
+| Missed | `ist-midnight` (needs a 00:30 IST probe → Boundary Calculator, M10), `long-reason-500` (needs a > 200-char reason → Boundary Calculator, M10) |
+| False alarms on `DEMO_BUGS=none` | **0** (precision 100 % on the clean run) |
+| Precision of failures across all runs | 96 % — the one "false alarm" is `idor-leave-read` also failing the confirmed cross-employee-read rule (same bug, second oracle) |
+| Mutation kill rate (demo) | **96 % (143/149)** — target ≥ 70 %; 19 equivalent mutants excluded; 0 weak tests; 0 fragile under `delay-2s` |
+| Surviving mutants | 6, all on `POST /api/leaves` in tests that expect the create to be refused |
+| Time | bench 2.8 min (15 suite runs), mutate 8.3 min (40 suite runs); 0 LLM requests |
+| HRMS bench in manual activation mode with ≥ 1 real seeded bug | harness built + unit-tested (manual prompt); **needs a bug deployed on staging** |

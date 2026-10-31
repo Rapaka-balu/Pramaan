@@ -135,6 +135,8 @@ export interface EmittedTest {
   body: string[]; // lines inside the test function
   actors: string[];
   operations: string[];
+  /** JSONPaths the test reads, by operation (mutation testing skips faults on fields nobody reads). */
+  reads: Record<string, string[]>;
 }
 
 export function emitAssertion(a: AssertionT, createOps: Map<string, string>): EmittedTest {
@@ -152,7 +154,30 @@ export function emitAssertion(a: AssertionT, createOps: Map<string, string>): Em
   for (const c of a.assert) body.push(...emitCheck(c, ctx, a.data));
   const steps = [...a.arrange, ...a.act].filter((s): s is ApiStep => s.kind === 'api');
   // cleanup: records made by steward.create are torn down by the steward fixture.
-  return { body: dropUnusedBindings(body), actors: [...new Set(steps.map((s) => s.actor))], operations: [...new Set(steps.map((s) => `${s.op.method} ${s.op.path}`))] };
+  const opOf = new Map(steps.map((s) => [s.id, `${s.op.method} ${s.op.path}`]));
+  const reads: Record<string, string[]> = {};
+  const read = (step: string, p: string): void => {
+    const op = opOf.get(step);
+    if (op) reads[op] = [...new Set([...(reads[op] ?? []), p])].sort();
+  };
+  const finalBody = dropUnusedBindings(body);
+  // A capture counts as a read only if the compiled code still uses it.
+  for (const s of steps) {
+    for (const [name, p] of Object.entries(s.capture)) if (finalBody.some((l) => l.includes(capVar(name)))) read(s.id, p);
+  }
+  const deltaPaths = new Map<string, Set<string>>(); // op → paths read only through a delta (a constant offset cancels)
+  for (const c of a.assert) {
+    if (c.kind === 'status') read(c.step, '#status');
+    else if (c.kind === 'field') read(c.step, c.path);
+    else if (c.kind === 'delta') {
+      for (const st of [c.before, c.after]) {
+        const op = opOf.get(st);
+        if (op) deltaPaths.set(op, new Set([...(deltaPaths.get(op) ?? []), c.path]));
+      }
+    } else for (const r of c.refs) read(r.step, r.path);
+  }
+  for (const [op, paths] of deltaPaths) for (const p of paths) if (!(reads[op] ?? []).includes(p)) reads[op] = [...new Set([...(reads[op] ?? []), `~${p}`])].sort();
+  return { body: finalBody, actors: [...new Set(steps.map((s) => s.actor))], operations: [...new Set(steps.map((s) => `${s.op.method} ${s.op.path}`))], reads };
 }
 
 /** `const x = await …;` whose x is never read becomes `await …;`; an unread capture line is removed. */

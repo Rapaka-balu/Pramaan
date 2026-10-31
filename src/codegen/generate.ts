@@ -13,6 +13,7 @@ import type { ApiModel } from '../spec/har-to-openapi.js';
 import type { RuleT } from '../spec/rule-proposer.js';
 import { CompileError, emitAssertion } from './dsl-to-ts.js';
 import { camel, methodName, pageClassName, slug, testName, uniqueNames } from './names.js';
+import { FAULTS_TS } from './static-faults.js';
 import * as S from './static-files.js';
 
 export const PRAMAAN_VERSION = '0.1.0';
@@ -49,6 +50,8 @@ export interface TestIndexEntry {
   tags: string[];
   oracle: 'confirmed-rule' | 'authz-matrix' | 'consistency' | 'implicit';
   operations: string[];
+  /** JSONPaths read per operation; '$' = the whole body, '#status' = only the status code. */
+  reads: Record<string, string[]>;
   ruleIds: string[];
   assertionIds: string[];
 }
@@ -241,7 +244,7 @@ const fixtureArgs = (code: string, candidates: string[]): string => {
 function assertionSpecs(inp: CompileInputs, index: TestIndexEntry[], skipped: Generated['skipped']): Map<string, string> {
   const files = new Map<string, string>();
   const createOps = new Map(inp.bindings.map((b) => [b.createOp, b.entity.name]));
-  const groups = new Map<string, { title: string; body: string[]; tags: string[]; a: AssertionT; rule: RuleT; ops: string[] }[]>();
+  const groups = new Map<string, { title: string; body: string[]; tags: string[]; a: AssertionT; rule: RuleT; ops: string[]; reads: Record<string, string[]> }[]>();
   for (const a of inp.assertions.filter((x) => x.status === 'confirmed').sort((x, y) => x.id.localeCompare(y.id))) {
     const rule = inp.rules.find((r) => r.id === a.ruleId);
     if (!rule || rule.status !== 'confirmed') {
@@ -253,7 +256,7 @@ function assertionSpecs(inp: CompileInputs, index: TestIndexEntry[], skipped: Ge
       const kind = e.actors.length >= 2 ? 'workflow' : 'api';
       const file = `specs/${kind}/${slug(rule.entities[0] ?? 'general', 4) || 'general'}.spec.ts`;
       const list = groups.get(file) ?? [];
-      list.push({ title: testName(rule.title), body: e.body, tags: [kind === 'workflow' ? '@workflow' : '@api', '@regression'], a, rule, ops: e.operations });
+      list.push({ title: testName(rule.title), body: e.body, tags: [kind === 'workflow' ? '@workflow' : '@api', '@regression'], a, rule, ops: e.operations, reads: e.reads });
       groups.set(file, list);
     } catch (err) {
       if (!(err instanceof CompileError)) throw err;
@@ -264,7 +267,7 @@ function assertionSpecs(inp: CompileInputs, index: TestIndexEntry[], skipped: Ge
     const titles = uniqueNames(tests.map((t) => t.title));
     const blocks = tests.map((t, i) => {
       const code = t.body.join('\n');
-      index.push({ file, title: titles[i] ?? t.title, tags: t.tags, oracle: 'confirmed-rule', operations: t.ops, ruleIds: [t.rule.id], assertionIds: [t.a.id] });
+      index.push({ file, title: titles[i] ?? t.title, tags: t.tags, oracle: 'confirmed-rule', operations: t.ops, reads: t.reads, ruleIds: [t.rule.id], assertionIds: [t.a.id] });
       return [
         `  // ${t.rule.id}: ${t.rule.title}`,
         `  test(${q(titles[i] ?? t.title)}, { tag: ${JSON.stringify(t.tags)} }, async (${fixtureArgs(code, ['api', 'steward', 'runTag', 'dates'])}) => {`,
@@ -293,7 +296,7 @@ function smokeSpec(inp: CompileInputs, pages: Map<string, PageInfo>, index: Test
     imports.add(page.className);
     const v = camel(page.className.replace(/Page$/, '')) || 'landing';
     const title = `should_show_main_navigation_when_${slug(role.id)}_logs_in`;
-    index.push({ file: 'specs/ui/smoke.spec.ts', title, tags: ['@smoke'], oracle: 'implicit', operations: [], ruleIds: [], assertionIds: [] });
+    index.push({ file: 'specs/ui/smoke.spec.ts', title, tags: ['@smoke'], oracle: 'implicit', operations: [`GET ${st.route}`], reads: {}, ruleIds: [], assertionIds: [] });
     tests.push(
       [
         `test(${q(title)}, { tag: ['@smoke'] }, async ({ pageAs }) => {`,
@@ -368,7 +371,7 @@ function consistencySpec(inp: CompileInputs, pages: Map<string, PageInfo>, index
           ]
         : [];
       const title = `should_show_the_api_${slug(p.field)}_when_${slug(role)}_reloads_${slug(p.route) || 'home'}`;
-      index.push({ file: 'specs/ui/consistency.spec.ts', title, tags: ['@regression'], oracle: 'consistency', operations: [p.op, ...(binding && approver ? [binding.createOp, binding.approve?.op ?? ''] : [])], ruleIds: [], assertionIds: [] });
+      index.push({ file: 'specs/ui/consistency.spec.ts', title, tags: ['@regression'], oracle: 'consistency', operations: [p.op, `GET ${p.route}`, ...(binding && approver ? [binding.createOp, binding.approve?.op ?? ''] : [])], reads: { [p.op]: [`$.${p.field}`] }, ruleIds: [], assertionIds: [] });
       tests.push(
         [
           `test(${q(title)}, { tag: ['@regression'] }, async ({ ${['pageAs', 'api', ...(mutate.length > 0 ? ['steward', 'runTag', 'dates'] : [])].join(', ')} }) => {`,
@@ -466,7 +469,7 @@ function authzFiles(inp: CompileInputs, index: TestIndexEntry[], skipped: Genera
     rows.push({ slug: rowSlug, operation: r.operation, method, path, query, ownerRole: r.ownerRole, record, mutating, ...target, cells });
     for (const c of cells) {
       const required = slug(SATISFIES[c.expect as keyof typeof SATISFIES].join(' or '));
-      index.push({ file: 'specs/authz/authz-matrix.spec.ts', title: `should_return_${required}_for_${slug(c.actor)}_when_calling_${rowSlug}`, tags: ['@authz', '@regression'], oracle: 'authz-matrix', operations: [`${method} ${path}`], ruleIds: [], assertionIds: [] });
+      index.push({ file: 'specs/authz/authz-matrix.spec.ts', title: `should_return_${required}_for_${slug(c.actor)}_when_calling_${rowSlug}`, tags: ['@authz', '@regression'], oracle: 'authz-matrix', operations: [`${method} ${path}`], reads: { [`${method} ${path}`]: [mutating ? '#status' : '$'] }, ruleIds: [], assertionIds: [] });
     }
   }
   if (rows.length === 0) return files;
@@ -642,6 +645,7 @@ export function generateSuite(inp: CompileInputs): Generated {
   files.set('helpers/api.ts', ts(S.API_TS));
   files.set('helpers/steward.ts', ts(S.STEWARD_TS));
   files.set('helpers/run-ledger.ts', ts(S.RUN_LEDGER_TS));
+  files.set('helpers/faults.ts', ts(FAULTS_TS));
   files.set('fixtures/global-teardown.ts', ts(S.GLOBAL_TEARDOWN_TS));
   files.set('helpers/dates.ts', ts(S.DATES_TS));
   files.set('helpers/normalize.ts', ts(S.NORMALIZE_TS));

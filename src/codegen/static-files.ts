@@ -61,13 +61,18 @@ export const TSCONFIG = `${JSON.stringify(
 
 export const GITIGNORE = ['node_modules/', '.auth/', 'test-results/', 'playwright-report/', 'allure-results/', 'allure-report/', '.pramaan-run/', 'results.json', '.env', ''].join('\n');
 
-export const PLAYWRIGHT_CONFIG = `import { defineConfig } from '@playwright/test';
+export const PLAYWRIGHT_CONFIG = `import { readFileSync } from 'node:fs';
+import { defineConfig } from '@playwright/test';
 import { app } from './config/app';
 import { baseUrl } from './config/env';
+
+// PRAMAAN_GREP_FILE: a regex of test titles to run (set by pramaan mutate / bench; avoids long command lines).
+const grepFile = process.env['PRAMAAN_GREP_FILE'];
 
 // Quarantined test ids (M9) are excluded from the gating run; a separate job still runs them.
 export default defineConfig({
   testDir: './specs',
+  ...(grepFile ? { grep: new RegExp(readFileSync(grepFile, 'utf8').trim()) } : {}),
   globalSetup: './fixtures/global-setup.ts',
   globalTeardown: './fixtures/global-teardown.ts',
   fullyParallel: false,
@@ -128,6 +133,7 @@ import { join } from 'node:path';
 import { request, type APIRequestContext } from '@playwright/test';
 import { app, type RoleConfig } from '../config/app';
 import { apiOrigin } from '../config/env';
+import { applyFault } from './faults';
 
 export interface CallResult {
   status: number;
@@ -139,7 +145,7 @@ export async function call(
   ctx: APIRequestContext,
   method: string,
   path: string,
-  opts: { data?: unknown; params?: Record<string, string> } = {},
+  opts: { data?: unknown; params?: Record<string, string>; noFault?: boolean } = {},
 ): Promise<CallResult> {
   const res = await ctx.fetch(path, {
     method,
@@ -153,7 +159,10 @@ export async function call(
   } catch {
     body = text;
   }
-  return { status: res.status(), body };
+  // Inert unless \`pramaan mutate\` set PRAMAAN_FAULT.
+  const result = { status: res.status(), body };
+  // Teardown passes noFault: an injected fault must never stop test data from being cleaned up.
+  return opts.noFault ? result : applyFault(method, path, result);
 }
 
 export const authFile = (role: string): string => join('.auth', \`\${role}.json\`);
@@ -233,7 +242,7 @@ export interface TeardownReport {
 export async function teardownRecord(api: Api, r: { entity: string; id: string; actor: string }): Promise<string> {
   const t = app.entities[r.entity]?.teardown;
   if (!t) return 'no-teardown';
-  const res = await call(await api.as(t.actor ?? r.actor), t.method, t.path.replace('{id}', encodeURIComponent(r.id)));
+  const res = await call(await api.as(t.actor ?? r.actor), t.method, t.path.replace('{id}', encodeURIComponent(r.id)), { noFault: true });
   if (res.status >= 200 && res.status < 300) return 'deleted';
   if (res.status === 409 || res.status === 410) return 'retired';
   return \`HTTP \${res.status}\`;
@@ -452,7 +461,7 @@ export const flows: Record<string, (page: Page, args: Record<string, string>) =>
 };
 `;
 
-export const GLOBAL_SETUP_TS = `import { mkdirSync } from 'node:fs';
+export const GLOBAL_SETUP_TS = `import { existsSync, mkdirSync } from 'node:fs';
 import { chromium } from '@playwright/test';
 import { app } from '../config/app';
 import { baseUrl } from '../config/env';
@@ -471,6 +480,7 @@ export default async function globalSetup(): Promise<void> {
       const username = process.env[role.usernameEnv];
       const password = process.env[role.passwordEnv];
       if (!username || !password) continue; // tests using this role fail with a clear "no session" message
+      if (process.env['PRAMAAN_REUSE_AUTH'] === '1' && existsSync(authFile(role.id))) continue; // repeated bench/mutate runs
       const context = await browser.newContext({ baseURL: baseUrl() });
       const page = await context.newPage();
       await login(page, { tenant: process.env[role.tenantCodeEnv], username, password });
@@ -488,6 +498,8 @@ import { app } from '../config/app';
 import { baseUrl } from '../config/env';
 import { Api, authFile, call } from '../helpers/api';
 import { dates, runTag as makeRunTag } from '../helpers/dates';
+import { appendFileSync } from 'node:fs';
+import { activeFault, applyFault, faultFired, matches, resetFaultFired } from '../helpers/faults';
 import { jp } from '../helpers/jsonpath';
 import { normalize } from '../helpers/normalize';
 import { Steward } from '../helpers/steward';
@@ -499,12 +511,24 @@ interface Fixtures {
   dates: typeof dates;
   /** A page logged in as the role, watched by the implicit oracle (console errors, page errors, 5xx, failed requests). */
   pageAs: (role: string) => Promise<Page>;
+  /** Records whether an injected fault fired in this test (pramaan mutate only). */
+  faultLog: void;
 }
 
 const IGNORE_CONSOLE = app.implicitOracle.ignoreConsolePatterns.map((p) => new RegExp(p));
 const IGNORE_REQUEST = app.implicitOracle.ignoreRequestPatterns.map((p) => new RegExp(p));
 
 export const test = base.extend<Fixtures>({
+  faultLog: [
+    // eslint-disable-next-line no-empty-pattern
+    async ({}, use, testInfo) => {
+      resetFaultFired();
+      await use();
+      const log = process.env['PRAMAAN_FAULT_LOG'];
+      if (log) appendFileSync(log, JSON.stringify({ title: testInfo.title, fired: faultFired() }) + '\\n');
+    },
+    { auto: true },
+  ],
   // eslint-disable-next-line no-empty-pattern
   api: async ({}, use) => {
     const api = new Api();
@@ -532,6 +556,24 @@ export const test = base.extend<Fixtures>({
     await use(async (role: string) => {
       const context = await browser.newContext({ storageState: authFile(role), baseURL: baseUrl() });
       contexts.push(context);
+      const fault = activeFault();
+      if (fault) {
+        // Browser traffic sees the same injected fault as API calls (\`pramaan mutate\` only).
+        await context.route('**/*', async (route) => {
+          const req = route.request();
+          if (!matches(fault, req.method(), req.url())) return route.fallback();
+          const res = await route.fetch();
+          const text = await res.text();
+          let body: unknown = text;
+          try {
+            body = JSON.parse(text) as unknown;
+          } catch {
+            // not JSON: corrupt nothing but the status
+          }
+          const out = await applyFault(req.method(), req.url(), { status: res.status(), body }, 'ui');
+          await route.fulfill({ status: out.status, headers: { ...res.headers(), 'content-type': 'application/json' }, body: JSON.stringify(out.body ?? null) });
+        });
+      }
       const page = await context.newPage();
       page.on('console', (m) => {
         if (m.type() === 'error' && !IGNORE_CONSOLE.some((re) => re.test(m.text()))) problems.push(\`console error: \${m.text()}\`);

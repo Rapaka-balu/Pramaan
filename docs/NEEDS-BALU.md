@@ -10,6 +10,9 @@ Open asks that block or degrade work. Newest first. Tick when resolved.
 ## LLM
 - [ ] **ANTHROPIC_API_KEY** in `.env` once bought (D-012). Then I run `npm run llm:smoke` (a few cents) and, with your OK on the estimate, record the demo LLM fixtures.
 
+## M8
+- [ ] **30 seeded HRMS bugs** with the devs: 8 calculation, 8 authz/tenant, 7 validation, 7 UI/workflow, listed in `benchmark/hrms/bugs.yaml` with `activation: { manual: "<how to deploy it>" }` (or an env flag the devs add). `pramaan bench --app hrms --target staging` then pauses for each one.
+
 ## M5
 - [ ] Your first real review session on HRMS (`pramaan review --app hrms --interactive`, or `--export` for a checklist) once staging has been crawled. Your minutes are the first measurement of lead workload.
 - [ ] The 7 seed attendance rules (`apps/hrms/seed-rules.yaml`) get assertions only once attendance operations are observed on staging and the LLM key is in (no domain-pack template covers them).

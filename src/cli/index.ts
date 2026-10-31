@@ -4,7 +4,9 @@ import { Command, Option } from 'commander';
 import { repoRoot } from '../core/config.js';
 import { stateRoot } from '../core/paths.js';
 import { runAuthz } from '../authz/run.js';
+import { runBench } from '../bench/run.js';
 import { runCompile } from '../codegen/compile.js';
+import { runMutate } from '../mutation/runner.js';
 import { runSuite } from '../codegen/run-suite.js';
 import { runCrawl } from '../crawler/crawl.js';
 import { runOrphans, runSeed, runTeardown } from '../data/commands.js';
@@ -173,6 +175,31 @@ program
   .addOption(targetOption())
   .action(async (opts: { app: string; run?: string; target?: 'staging' }) => {
     const res = await runOrphans({ appId: opts.app, stateRoot: stateRoot(), target: opts.target, ...(opts.run ? { runId: opts.run } : {}) });
+    console.log(res.summary);
+    process.exitCode = res.exitCode;
+  });
+
+program
+  .command('bench')
+  .description('seeded-bug recall and precision of the compiled suite (demo restarts per bug; other apps: manual activation)')
+  .requiredOption('--app <id>', 'app id under apps/')
+  .option('--bugs <ids>', 'all, or a comma-separated list of bug ids', 'all')
+  .option('--repo <path>', 'override output.repoPath')
+  .action(async (opts: { app: string; bugs: string; repo?: string }) => {
+    const res = await runBench({ appId: opts.app, stateRoot: stateRoot(), bugs: opts.bugs === 'all' ? 'all' : opts.bugs.split(',').map((b) => b.trim()), ...(opts.repo ? { repoPath: opts.repo } : {}) });
+    console.log(res.summary);
+    process.exitCode = res.exitCode;
+  });
+
+program
+  .command('mutate')
+  .description('fault injection: does each regression test fail when the response it relies on is corrupted?')
+  .requiredOption('--app <id>', 'app id under apps/')
+  .addOption(targetOption())
+  .option('--ops <ops>', 'limit to these operations, e.g. "GET /api/leave-balance" (comma-separated)')
+  .option('--repo <path>', 'override output.repoPath')
+  .action(async (opts: { app: string; target?: 'staging'; ops?: string; repo?: string }) => {
+    const res = await runMutate({ appId: opts.app, stateRoot: stateRoot(), target: opts.target, ...(opts.ops ? { ops: opts.ops.split(',').map((o) => o.trim()) } : {}), ...(opts.repo ? { repoPath: opts.repo } : {}) });
     console.log(res.summary);
     process.exitCode = res.exitCode;
   });

@@ -222,3 +222,21 @@ stays keyless (D-010); with the key, run `npm run llm:smoke`, then record demo f
 - **Suite side:** the steward appends every create/teardown to `.pramaan-run/<runTag>.jsonl`; global setup fixes one run
   tag for all workers (`PRAMAAN_RUN_ID`); the global teardown tears down anything a crashed test left and fails the run
   only for records whose known teardown failed (no-teardown entities are listed in `<tag>.no-teardown.txt`).
+
+## D-018 · 2026-10-31 · Benchmark and mutation (M8) choices
+- **Bench hit rule:** failing test's oracle = bug's expected oracle AND operations intersect (query strings ignored,
+  UI routes like `GET /dashboard` count). Per the bug catalog's own note, an expected `charter-candidate` is satisfied
+  by `confirmed-rule` (the candidate became a confirmed rule). A failure whose messages include "implicit oracle" is
+  classed `implicit`, whatever test it happened in. Everything else is a false alarm — including the same bug caught
+  a second time by another oracle (strict §8 definition; it shows up as < 100 % precision during bug runs).
+- **Bug activation:** demo restarts in-process per bug on one fixed port (stored sessions stay valid → logins are
+  reused with `PRAMAAN_REUSE_AUTH`); any other app is activated by hand (`activation.manual`, runner waits for Enter).
+- **Fault injection lives in the suite** (`helpers/faults.ts`): `call()` for API traffic, `context.route` for browser
+  traffic; `PRAMAAN_FAULT=<kind>:<METHOD path>[#field][@ui]`. Teardown calls pass `noFault`, so a fault can never stop
+  test data from being cleaned up. `PRAMAAN_GREP_FILE` selects tests without long command lines.
+- **Equivalent mutants are excluded two ways:** (1) by plan — faults only on operations a test touches and fields it
+  reads, per oracle: authz tests (a differential oracle) get status faults only, because a body fault every caller sees
+  cannot change who-sees-what; consistency tests get field faults on the UI channel only (`@ui`); delta-only fields skip
+  `number-plus-one` (a constant offset cancels); list/tenant faults only where a test reads list items / owner fields;
+  (2) at run time — a mutant whose fault never changed a response the test received (fault log per test) is equivalent.
+  First naive plan measured 45 % (body faults on authz tests made up most survivors); the oracle-aware plan 96 %.
