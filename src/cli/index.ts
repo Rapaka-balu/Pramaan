@@ -5,6 +5,7 @@ import { repoRoot } from '../core/config.js';
 import { stateRoot } from '../core/paths.js';
 import { runCrawl } from '../crawler/crawl.js';
 import { runOnboard } from '../onboarding/onboard.js';
+import { runInfer } from '../spec/infer.js';
 import { formatDoctor, runDoctor } from './doctor.js';
 
 const program = new Command();
@@ -56,6 +57,18 @@ program
       roles: opts.role?.split(',').map((s) => s.trim()),
       maxStates: opts.maxStates,
     });
+    console.log(res.summary);
+    process.exitCode = res.exitCode;
+  });
+
+program
+  .command('infer')
+  .description('observed OpenAPI, entities and state machines from the crawl; lifecycle probe confirms transitions')
+  .requiredOption('--app <id>', 'app id under apps/')
+  .addOption(targetOption())
+  .option('--no-probe', 'skip the lifecycle probe (no network calls)')
+  .action(async (opts: { app: string; target?: 'staging'; probe: boolean }) => {
+    const res = await runInfer({ appId: opts.app, stateRoot: stateRoot(), target: opts.target, probe: opts.probe });
     console.log(res.summary);
     process.exitCode = res.exitCode;
   });
