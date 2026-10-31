@@ -203,3 +203,22 @@ stays keyless (D-010); with the key, run `npm run llm:smoke`, then record demo f
   and is row-scoped only when it repeats (a "View" link per row) — page objects now get the navigation.
 - **`pramaan run`** is async (`spawn`), so an in-process demo server keeps answering; it passes the suite only URLs,
   `PRAMAAN_RUN_ID` and the role logins from the app's env.
+
+## D-017 · 2026-10-31 · Data Steward hardening (M7) choices
+- **Fake identities that can never be real:** PAN keeps the `AAAAA9999A` format but uses a 4th (holder-type) letter
+  that is never issued (D E I K M N O Q R S U V W X Y Z); Aadhaar is 12 digits starting 2–9 that *fail* the Verhoeff
+  check digit. Mobiles `+91 [6-9]XXXXXXXXX`, IFSC `PRMQ0…`, dates in Asia/Kolkata.
+- **Create bodies** start from an observed, known-valid body (crawl recipe) and refresh what reuse would get wrong:
+  tagged free text, an IST date window (start = end, one day), names/phones/IDs from the factory. Unknown fields keep
+  their observed value — safer than inventing values for fields Pramaan has never seen filled.
+- **Teardown plan:** DELETE on the record → observed cancel/withdraw transition → reject (called by the role allowed to
+  reject) → learned op. 2xx = deleted, 409/410 = retired (already terminal). No plan → `data.orphaned` with reason and a
+  one-time ask in NEEDS-BALU.md ("Cleanup endpoints"); not a run failure.
+- **Live orphans** are found from the app itself: every list endpoint, as every role, records carrying a `PRM-<runId>`
+  tag; a tagged record in a terminal state (no observed way out) is *retired*, not orphaned.
+- **Interrupted runs:** `pramaan teardown --run <id>` needs only the ledger (`data.created` minus `data.deleted` /
+  `data.orphaned`) plus the Living Spec's teardown plans; teardown events are appended under the killed run's id.
+  Without a Living Spec (a first-ever crawl killed) there are no plans yet — run `infer` first.
+- **Suite side:** the steward appends every create/teardown to `.pramaan-run/<runTag>.jsonl`; global setup fixes one run
+  tag for all workers (`PRAMAAN_RUN_ID`); the global teardown tears down anything a crashed test left and fails the run
+  only for records whose known teardown failed (no-teardown entities are listed in `<tag>.no-teardown.txt`).

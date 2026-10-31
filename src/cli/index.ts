@@ -7,6 +7,7 @@ import { runAuthz } from '../authz/run.js';
 import { runCompile } from '../codegen/compile.js';
 import { runSuite } from '../codegen/run-suite.js';
 import { runCrawl } from '../crawler/crawl.js';
+import { runOrphans, runSeed, runTeardown } from '../data/commands.js';
 import { runOnboard } from '../onboarding/onboard.js';
 import { exportReview, importReview, inquirerPrompter, queueSummary, runInteractiveReview } from '../lead/review.js';
 import { runInfer } from '../spec/infer.js';
@@ -134,6 +135,44 @@ program
   .option('--repo <path>', 'override output.repoPath')
   .action(async (opts: { app: string; target?: 'staging'; suite: 'smoke' | 'regression' | 'authz' | 'all'; repo?: string }) => {
     const res = await runSuite({ appId: opts.app, stateRoot: stateRoot(), suite: opts.suite, target: opts.target, ...(opts.repo ? { repoPath: opts.repo } : {}) });
+    console.log(res.summary);
+    process.exitCode = res.exitCode;
+  });
+
+program
+  .command('seed')
+  .description('create tagged records through the observed create operation (en_IN factory)')
+  .requiredOption('--app <id>', 'app id under apps/')
+  .requiredOption('--entity <name>', 'entity from entities.yaml')
+  .option('--count <n>', 'how many', (v) => Number.parseInt(v, 10), 1)
+  .option('--role <id>', 'create as this role (default: the role the crawl saw creating it)')
+  .addOption(targetOption())
+  .action(async (opts: { app: string; entity: string; count: number; role?: string; target?: 'staging' }) => {
+    const res = await runSeed({ appId: opts.app, stateRoot: stateRoot(), entity: opts.entity, count: opts.count, target: opts.target, ...(opts.role ? { role: opts.role } : {}) });
+    console.log(res.summary);
+    process.exitCode = res.exitCode;
+  });
+
+program
+  .command('teardown')
+  .description("tear down what a run created (also after it was killed halfway), from the ledger")
+  .requiredOption('--app <id>', 'app id under apps/')
+  .requiredOption('--run <runId>', 'the run to clean up')
+  .addOption(targetOption())
+  .action(async (opts: { app: string; run: string; target?: 'staging' }) => {
+    const res = await runTeardown({ appId: opts.app, stateRoot: stateRoot(), runId: opts.run, target: opts.target });
+    console.log(res.summary);
+    process.exitCode = res.exitCode;
+  });
+
+program
+  .command('orphans')
+  .description('list Pramaan-tagged records still live in the app (any run, or one with --run)')
+  .requiredOption('--app <id>', 'app id under apps/')
+  .option('--run <runId>', 'only this run')
+  .addOption(targetOption())
+  .action(async (opts: { app: string; run?: string; target?: 'staging' }) => {
+    const res = await runOrphans({ appId: opts.app, stateRoot: stateRoot(), target: opts.target, ...(opts.run ? { runId: opts.run } : {}) });
     console.log(res.summary);
     process.exitCode = res.exitCode;
   });

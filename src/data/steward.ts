@@ -48,6 +48,8 @@ export interface TeardownDeps {
   headersFor: (role: string) => Record<string, string> | undefined;
   /** Teardown ops learned during the run, by entity (used when a record has none of its own). */
   learned?: ReadonlyMap<string, string>;
+  /** Resolved plans by entity (M7): op plus the role that must call it (e.g. reject by an approver). */
+  plans?: ReadonlyMap<string, { op: string; actor?: string | undefined }>;
 }
 
 export interface TeardownResult {
@@ -116,8 +118,9 @@ export class Steward {
   async teardown(deps: TeardownDeps, records: readonly CreatedRecord[] = this.records): Promise<TeardownResult> {
     const result: TeardownResult = { deleted: [], retired: [], orphaned: [] };
     for (const r of [...records].reverse()) {
-      const op = r.teardownOp ?? deps.learned?.get(r.entity);
-      const headers = deps.headersFor(r.role);
+      const plan = deps.plans?.get(r.entity);
+      const op = r.teardownOp ?? plan?.op ?? deps.learned?.get(r.entity);
+      const headers = deps.headersFor(!r.teardownOp && plan?.actor ? plan.actor : r.role);
       const orphan = (reason: string): void => {
         result.orphaned.push({ record: r, reason });
         this.ledger.append({ runId: this.runId, type: 'data.orphaned', actor: this.actor, data: { entity: r.entity, id: r.id, reason } });

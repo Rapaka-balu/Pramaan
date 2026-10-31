@@ -9,7 +9,8 @@
 | M4 — Authorization differential matrix | **demo done**; HRMS matrix pending staging | 2026-10-31 |
 | M5 — Rule proposer, seed rules, review queue v0 | **demo done**; HRMS first review session pending | 2026-10-31 |
 | M6 — Compiler: the suite repo | **demo done**; first HRMS suite + Balu review pending | 2026-10-31 |
-| M7 — Data Steward hardening | next | |
+| M7 — Data Steward hardening | **demo done**; HRMS orphan/irreversible-op counts pending staging | 2026-10-31 |
+| M8 — Benchmark and mutation self-check | next | |
 
 ## M0 — measured (2026-10-08)
 
@@ -104,3 +105,13 @@
 | Regenerating twice without input changes | 0 files written, no branch, clean `git status` |
 | Authz matrix spec on the 3 authz bugs | fails for employee2 → leave by id, employee → /api/employees, other-tenant t2-admin → leaves?all; passes on `none` |
 | HRMS: first compiled suite as a PR + Balu's review minutes | **not run** — needs staging |
+
+## M7 — measured (2026-10-31, demo)
+
+| Acceptance check | Result |
+| --- | --- |
+| After a full compile, run and teardown: `orphans()` | **0** live tagged records (checked in the M6 e2e after the suite run) |
+| Kill the run halfway, then `pramaan teardown --run <id>` | crawl process killed right after its first `data.created`; teardown left **0** pending records and **0** live records for that run |
+| Seed → orphans → teardown | 3 seeded leaves found live by tag, then 0 live / 3 retired after teardown |
+| en_IN factories | PAN format-valid with a never-issued holder type (50/50), Aadhaar Verhoeff-invalid (50/50), +91 mobiles |
+| HRMS: orphan counts, irreversible operations, Balu's policy per operation | **not run** — needs staging |

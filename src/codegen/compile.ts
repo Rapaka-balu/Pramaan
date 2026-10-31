@@ -9,6 +9,7 @@ import { workspaceDir } from '../core/paths.js';
 import { newRunId } from '../core/run-id.js';
 import { Candidate, FormInfo, TextElement } from '../crawler/candidates.js';
 import { normalizeRoute } from '../crawler/state-key.js';
+import { resolveTeardown, type TeardownPlan } from '../data/orphans.js';
 import { loadSession } from '../onboarding/sessions.js';
 import { loadAssertions } from '../spec/assertion-proposer.js';
 import { bindEntity } from '../spec/domain-pack.js';
@@ -95,12 +96,11 @@ export async function runCompile(opts: CompileOptions): Promise<CompileResult> {
     return b ? [b] : [];
   });
   const summaryPath = workspaceDir(opts.stateRoot, config.id, 'crawl', 'crawl-summary.json');
-  const teardownOps = new Map<string, string>(
-    Object.entries(existsSync(summaryPath) ? CrawlSummary.parse(JSON.parse(readFileSync(summaryPath, 'utf8'))).learnedTeardown : {}),
-  );
+  const learned = existsSync(summaryPath) ? CrawlSummary.parse(JSON.parse(readFileSync(summaryPath, 'utf8'))).learnedTeardown : {};
+  const teardownOps = new Map<string, TeardownPlan>();
   for (const e of entities) {
-    const cancel = e.stateMachine?.transitions.find((t) => t.observed && /\/\{id\}\/(cancel|withdraw)$/.test(t.op));
-    if (!teardownOps.has(e.name) && cancel) teardownOps.set(e.name, cancel.op);
+    const plan = resolveTeardown(e, learned[e.name]);
+    if (plan) teardownOps.set(e.name, plan);
   }
   const session = config.roles.map((r) => loadSession(opts.stateRoot, config.id, r.id)).find((s) => s !== undefined);
   const specTexts: Record<string, string> = {};

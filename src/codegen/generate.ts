@@ -37,7 +37,7 @@ export interface CompileInputs {
   assertions: AssertionT[];
   states: CrawlState[];
   authScheme: AuthScheme | undefined;
-  teardownOps: Map<string, string>;
+  teardownOps: Map<string, { op: string; actor?: string | undefined }>;
   ledgerEvents: LedgerEvent[];
   specTexts: Record<string, string>; // spec/<name> → raw text (openapi.observed.yaml, entities.yaml, rules.yaml, role-matrix.yaml)
   jsonpathSource: string; // Pramaan's self-contained JSONPath subset, copied into helpers/
@@ -173,11 +173,11 @@ function appConfigTs(inp: CompileInputs): string {
       : b?.source === 'cookie'
         ? { kind: 'cookie', names: b.names }
         : { kind: 'none' };
-  const entities: Record<string, { createPath: string; teardown?: { method: string; path: string } }> = {};
+  const entities: Record<string, { createPath: string; teardown?: { method: string; path: string; actor?: string } }> = {};
   for (const bd of inp.bindings) {
-    const op = inp.teardownOps.get(bd.entity.name);
-    const [method, path] = op?.split(' ') ?? [];
-    entities[bd.entity.name] = { createPath: bd.createPath, ...(method && path ? { teardown: { method, path } } : {}) };
+    const plan = inp.teardownOps.get(bd.entity.name);
+    const [method, path] = plan?.op.split(' ') ?? [];
+    entities[bd.entity.name] = { createPath: bd.createPath, ...(method && path ? { teardown: { method, path, ...(plan?.actor ? { actor: plan.actor } : {}) } } : {}) };
   }
   const value = {
     id: config.id,
@@ -217,7 +217,7 @@ function appConfigTs(inp: CompileInputs): string {
       '  auth: AuthConfig;',
       '  tenantHeader: string | null;',
       '  roles: RoleConfig[];',
-      '  entities: Record<string, { createPath: string; teardown?: { method: string; path: string } }>;',
+      '  entities: Record<string, { createPath: string; teardown?: { method: string; path: string; actor?: string } }>;',
       '  implicitOracle: { ignoreConsolePatterns: string[]; ignoreRequestPatterns: string[] };',
       '}',
       '',
@@ -641,6 +641,8 @@ export function generateSuite(inp: CompileInputs): Generated {
   files.set('config/app.ts', appConfigTs(inp));
   files.set('helpers/api.ts', ts(S.API_TS));
   files.set('helpers/steward.ts', ts(S.STEWARD_TS));
+  files.set('helpers/run-ledger.ts', ts(S.RUN_LEDGER_TS));
+  files.set('fixtures/global-teardown.ts', ts(S.GLOBAL_TEARDOWN_TS));
   files.set('helpers/dates.ts', ts(S.DATES_TS));
   files.set('helpers/normalize.ts', ts(S.NORMALIZE_TS));
   files.set('helpers/consistency.ts', ts(S.CONSISTENCY_TS));

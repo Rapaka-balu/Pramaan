@@ -59,7 +59,7 @@ export const TSCONFIG = `${JSON.stringify(
   2,
 )}\n`;
 
-export const GITIGNORE = ['node_modules/', '.auth/', 'test-results/', 'playwright-report/', 'allure-results/', 'allure-report/', 'results.json', '.env', ''].join('\n');
+export const GITIGNORE = ['node_modules/', '.auth/', 'test-results/', 'playwright-report/', 'allure-results/', 'allure-report/', '.pramaan-run/', 'results.json', '.env', ''].join('\n');
 
 export const PLAYWRIGHT_CONFIG = `import { defineConfig } from '@playwright/test';
 import { app } from './config/app';
@@ -69,6 +69,7 @@ import { baseUrl } from './config/env';
 export default defineConfig({
   testDir: './specs',
   globalSetup: './fixtures/global-setup.ts',
+  globalTeardown: './fixtures/global-teardown.ts',
   fullyParallel: false,
   workers: 1, // tests share account balances; one worker keeps deltas deterministic
   retries: 0, // flakiness is triaged, not retried away
@@ -216,16 +217,36 @@ export class Api {
 export const STEWARD_TS = `import { app } from '../config/app';
 import { call, type Api, type CallResult } from './api';
 import { jp } from './jsonpath';
+import { appendRunEvent } from './run-ledger';
 
 export interface Created extends CallResult {
   id?: string;
+}
+export interface TeardownReport {
+  /** A known teardown operation failed: a real orphan. */
+  orphaned: string[];
+  /** No teardown operation exists for the entity: listed for the devs, not a failure. */
+  noTeardown: string[];
+}
+
+/** Tears one record down; 409/410 mean it already reached a terminal state (retired). */
+export async function teardownRecord(api: Api, r: { entity: string; id: string; actor: string }): Promise<string> {
+  const t = app.entities[r.entity]?.teardown;
+  if (!t) return 'no-teardown';
+  const res = await call(await api.as(t.actor ?? r.actor), t.method, t.path.replace('{id}', encodeURIComponent(r.id)));
+  if (res.status >= 200 && res.status < 300) return 'deleted';
+  if (res.status === 409 || res.status === 410) return 'retired';
+  return \`HTTP \${res.status}\`;
 }
 
 /** Data steward client: creates records through the observed create operation and always tears them down. */
 export class Steward {
   private readonly created: { entity: string; id: string; actor: string }[] = [];
 
-  constructor(private readonly api: Api) {}
+  constructor(
+    private readonly api: Api,
+    private readonly runTag: string,
+  ) {}
 
   async create(entity: string, opts: { actor: string; body: unknown }): Promise<Created> {
     const e = app.entities[entity];
@@ -233,27 +254,94 @@ export class Steward {
     const res = await call(await this.api.as(opts.actor), 'POST', e.createPath, { data: opts.body });
     const id = jp(res.body, '$.id');
     if (res.status >= 200 && res.status < 300 && (typeof id === 'string' || typeof id === 'number')) {
-      this.created.push({ entity, id: String(id), actor: opts.actor });
+      const rec = { entity, id: String(id), actor: opts.actor };
+      this.created.push(rec);
+      appendRunEvent(this.runTag, { event: 'created', ...rec });
       return { ...res, id: String(id) };
     }
     return res;
   }
 
-  /** Newest first. 409/410 mean the record already reached a terminal state (retired). */
-  async teardown(): Promise<{ orphaned: string[] }> {
-    const orphaned: string[] = [];
+  /** Newest first; every outcome is written to the run ledger so the global teardown can finish the job. */
+  async teardown(): Promise<TeardownReport> {
+    const report: TeardownReport = { orphaned: [], noTeardown: [] };
     for (const r of this.created.reverse()) {
-      const t = app.entities[r.entity]?.teardown;
-      if (!t) {
-        orphaned.push(\`\${r.entity} \${r.id}: no teardown operation\`);
-        continue;
-      }
-      const res = await call(await this.api.as(r.actor), t.method, t.path.replace('{id}', encodeURIComponent(r.id)));
-      if (!(res.status >= 200 && res.status < 300) && res.status !== 409 && res.status !== 410) orphaned.push(\`\${r.entity} \${r.id}: HTTP \${res.status}\`);
+      const outcome = await teardownRecord(this.api, r);
+      if (outcome === 'deleted' || outcome === 'retired') appendRunEvent(this.runTag, { event: outcome, ...r });
+      else if (outcome === 'no-teardown') report.noTeardown.push(\`\${r.entity} \${r.id}\`);
+      else report.orphaned.push(\`\${r.entity} \${r.id}: \${outcome}\`);
     }
     this.created.length = 0;
-    return { orphaned };
+    return report;
   }
+}
+`;
+
+export const RUN_LEDGER_TS = `import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+export interface RunEvent {
+  event: 'created' | 'deleted' | 'retired';
+  entity: string;
+  id: string;
+  actor: string;
+}
+
+const DIR = '.pramaan-run';
+export const runLedgerPath = (runTag: string): string => join(DIR, \`\${runTag}.jsonl\`);
+
+/** Append-only record of what this run created and removed; survives a crashed worker. */
+export function appendRunEvent(runTag: string, e: RunEvent): void {
+  mkdirSync(DIR, { recursive: true });
+  appendFileSync(runLedgerPath(runTag), JSON.stringify(e) + '\\n');
+}
+
+/** Records created in this run and not yet deleted or retired. */
+export function pendingRecords(runTag: string): RunEvent[] {
+  const p = runLedgerPath(runTag);
+  if (!existsSync(p)) return [];
+  const done = new Set<string>();
+  const created: RunEvent[] = [];
+  for (const line of readFileSync(p, 'utf8').split('\\n')) {
+    if (line.trim() === '') continue;
+    const e = JSON.parse(line) as RunEvent;
+    if (e.event === 'created') created.push(e);
+    else done.add(e.entity + ':' + e.id);
+  }
+  return created.filter((e) => !done.has(e.entity + ':' + e.id));
+}
+`;
+
+export const GLOBAL_TEARDOWN_TS = `import { writeFileSync } from 'node:fs';
+import { app } from '../config/app';
+import { Api } from '../helpers/api';
+import { runTag } from '../helpers/dates';
+import { appendRunEvent, pendingRecords, runLedgerPath } from '../helpers/run-ledger';
+import { teardownRecord } from '../helpers/steward';
+
+/** Backstop after the whole run: tears down anything a crashed test left, then fails the run on real orphans. */
+export default async function globalTeardown(): Promise<void> {
+  const tag = runTag(app.runTagPrefix);
+  const pending = pendingRecords(tag);
+  if (pending.length === 0) return;
+  const api = new Api();
+  const orphaned: string[] = [];
+  const noTeardown: string[] = [];
+  try {
+    for (const r of pending.reverse()) {
+      const outcome = await teardownRecord(api, r);
+      if (outcome === 'deleted' || outcome === 'retired') appendRunEvent(tag, { ...r, event: outcome });
+      else if (outcome === 'no-teardown') noTeardown.push(r.entity + ' ' + r.id);
+      else orphaned.push(r.entity + ' ' + r.id + ': ' + outcome);
+    }
+  } finally {
+    await api.dispose();
+  }
+  if (noTeardown.length > 0) {
+    // Known gap, not a failure: the app has no way to remove these. Ask the devs for a cleanup endpoint.
+    writeFileSync(runLedgerPath(tag).replace(/[.]jsonl$/, '.no-teardown.txt'), noTeardown.join('\\n') + '\\n');
+  }
+  if (orphaned.length > 0) throw new Error('orphaned test data after run ' + tag + ':\\n' + orphaned.join('\\n'));
 }
 `;
 
@@ -370,9 +458,12 @@ import { app } from '../config/app';
 import { baseUrl } from '../config/env';
 import { login } from '../flows/login';
 import { authFile } from '../helpers/api';
+import { runTag } from '../helpers/dates';
 
 /** Logs in once per role whose credentials are set, saving its session to .auth/<role>.json. */
 export default async function globalSetup(): Promise<void> {
+  // One run tag for the whole run (workers inherit env set here), so the global teardown finds every record.
+  process.env['PRAMAAN_RUN_ID'] ??= runTag('PRM').slice('PRM-'.length);
   mkdirSync('.auth', { recursive: true });
   const browser = await chromium.launch();
   try {
@@ -420,10 +511,11 @@ export const test = base.extend<Fixtures>({
     await use(api);
     await api.dispose();
   },
-  steward: async ({ api }, use) => {
-    const steward = new Steward(api);
+  steward: async ({ api, runTag }, use, testInfo) => {
+    const steward = new Steward(api, runTag);
     await use(steward);
-    const { orphaned } = await steward.teardown();
+    const { orphaned, noTeardown } = await steward.teardown();
+    if (noTeardown.length > 0) testInfo.annotations.push({ type: 'no-teardown', description: noTeardown.join(', ') });
     expect(orphaned, 'every record this test created should be torn down').toEqual([]);
   },
   // eslint-disable-next-line no-empty-pattern

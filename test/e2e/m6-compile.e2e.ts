@@ -9,6 +9,7 @@ import { runSuite } from '../../src/codegen/run-suite.js';
 import { run } from '../../src/codegen/writer.js';
 import { Ledger } from '../../src/core/ledger.js';
 import { runCrawl } from '../../src/crawler/crawl.js';
+import { runOrphans } from '../../src/data/commands.js';
 import { startDemo } from '../../fixtures/demo-hrms/server.mjs';
 import { loadAssertions, saveAssertion } from '../../src/spec/assertion-proposer.js';
 import { runInfer } from '../../src/spec/infer.js';
@@ -78,6 +79,10 @@ test('should_compile_an_llm_free_suite_that_passes_when_the_demo_has_no_bugs', a
   const hits = codeFiles(repo).filter((f) => LLM_WORDS.test(readFileSync(f, 'utf8')));
   expect(hits, 'no LLM provider names anywhere in the suite code').toEqual([]);
   const llmCalls = new Ledger({ root, app: 'demo' }).query({ type: 'llm.call' }).slice(llmBefore);
+
+  // Assert — M7: after compile, run and teardown, no tagged record is left live anywhere
+  const orphans = await runOrphans({ appId: 'demo', stateRoot: root });
+  expect(orphans.report?.live ?? [], orphans.summary).toEqual([]);
   expect(llmCalls.filter((e) => e.data['cached'] !== true), 'compile makes no uncached LLM calls').toEqual([]);
 });
 
