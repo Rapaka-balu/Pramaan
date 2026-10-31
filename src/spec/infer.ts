@@ -22,6 +22,9 @@ import { buildApiModel, toOpenApi } from './har-to-openapi.js';
 import { runLifecycleProbe, type ProbeResult } from './lifecycle-probe.js';
 import { apiMatcher, observationsFromHar, type Observation } from './observations.js';
 import { docOperations, scoreAgainstDocs, specUrlFromDocsPage, type DocsScore } from './score-vs-docs.js';
+import type { AssertionOutcome } from './assertion-proposer.js';
+import type { RuleT } from './rule-proposer.js';
+import { crawlUiStates, runRulesStep } from './rules-step.js';
 import { inferStateMachine, recordsIn, uiHintsFrom, type UiHint } from './state-machines.js';
 
 export interface InferOptions {
@@ -38,6 +41,10 @@ export interface InferResult {
   operations: string[];
   probe: Record<string, Omit<ProbeResult, 'observations'>>;
   docs?: DocsScore;
+  rules: RuleT[];
+  newRules: RuleT[];
+  rejectedRules: { title: string; reason: string }[];
+  assertionOutcomes: AssertionOutcome[];
   specDir: string;
   summary: string;
 }
@@ -100,7 +107,7 @@ export async function runInfer(opts: InferOptions): Promise<InferResult> {
   // 1. Observations from every role's crawl HAR.
   const roleDirs = existsSync(crawlDir) ? readdirSync(crawlDir).filter((r) => existsSync(join(crawlDir, r, 'crawl.har'))).sort() : [];
   if (roleDirs.length === 0) {
-    return { runId, exitCode: 2, entities: [], operations: [], probe: {}, specDir, summary: `pramaan infer — app ${config.id}\n  no crawl found: run \`pramaan crawl --app ${config.id}\` first` };
+    return { runId, exitCode: 2, entities: [], operations: [], probe: {}, rules: [], newRules: [], rejectedRules: [], assertionOutcomes: [], specDir, summary: `pramaan infer — app ${config.id}\n  no crawl found: run \`pramaan crawl --app ${config.id}\` first` };
   }
   const observations: Observation[] = roleDirs.flatMap((role) => observationsFromHar(join(crawlDir, role, 'crawl.har'), role, `crawl/${role}/crawl.har`, isApi));
   const uiStates = roleDirs.flatMap((r) => crawlStates(crawlDir, r));
@@ -133,10 +140,12 @@ export async function runInfer(opts: InferOptions): Promise<InferResult> {
   if (!allowed) notes.push(`lifecycle probe and docs scoring skipped: ${config.id} needs --target staging`);
   const guard = createTargetGuard(config.safety);
   const http = createHttp({ guard, limiter: createRateLimiter(config.safety.maxReplayRps), timeoutMs: 15_000 });
+  let readyRoles: string[] = [];
   if (allowed && opts.probe !== false) {
     const primary = config.tenants[0]?.id;
     const { ready } = await ensureRoleSessions(loaded, { stateRoot: opts.stateRoot, http, guard, tenants: primary ? [primary] : [] });
     const roles = ready.map((r) => r.role);
+    readyRoles = roles;
     const probeObs: Observation[] = [];
     const missing = new Set<string>();
     for (const e of entities) {
@@ -178,7 +187,26 @@ export async function runInfer(opts: InferOptions): Promise<InferResult> {
     }
   }
 
-  // 4. Write the Living Spec drafts.
+  // 4. Rules and assertions (M5): domain pack + LLM proposals; assertions dry-run when the network is allowed.
+  const rulesStep = await runRulesStep({
+    config,
+    repoRoot: repoRoot(),
+    stateRoot: opts.stateRoot,
+    model,
+    entities,
+    states: crawlUiStates(crawlDir, roleDirs, normalizeRoute),
+    readyRoles,
+    ledger,
+    runId,
+    runTag: runTag(config.safety.runTagPrefix, runId),
+    ...(allowed && opts.probe !== false && readyRoles.length > 0
+      ? { net: { http, apiOrigin, headersFor: (role: string) => loadAuthMaterial(opts.stateRoot, config.id, role)?.headers, learned } }
+      : {}),
+  });
+  const kept = rulesStep.assertions.filter((a) => a.status === 'kept');
+  const dryPassed = kept.filter((a) => a.dryRun?.passed).length;
+
+  // 5. Write the Living Spec drafts.
   const openapi = toOpenApi(model, { title: config.name, serverUrl: apiOrigin });
   writeFileSync(join(specDir, 'openapi.observed.yaml'), toYaml(openapi, { sortMapEntries: false, lineWidth: 0 }));
   writeFileSync(join(specDir, 'entities.yaml'), toYaml({ schemaVersion: 1, entities }, { lineWidth: 0 }));
@@ -202,8 +230,23 @@ export async function runInfer(opts: InferOptions): Promise<InferResult> {
     ...probeLines,
     ...(docs ? [`  docs score: precision ${(docs.precision * 100).toFixed(0)}% · recall ${(docs.recall * 100).toFixed(0)}% (${docs.matched}/${docs.documented} documented ops seen)`] : []),
     ...notes.map((n) => `  ${n}`),
-    `  LLM requests: 0 (entity names from path roots) · spec drafts: ${specDir}`,
-    '  needs the lead: review entities.yaml state machines (hypothesized transitions are observed:false)',
+    `  rules: ${rulesStep.proposal.rules.length} total · ${rulesStep.proposal.added.length} new (${rulesStep.proposal.added.filter((r) => r.source === 'domain-pack').length} domain-pack, ${rulesStep.proposal.added.filter((r) => r.source === 'inferred').length} inferred) · ${rulesStep.proposal.rejected.length} rejected`,
+    `  assertions: ${kept.length} kept (${dryPassed} dry-run passed) · ${rulesStep.assertions.filter((a) => a.status === 'discarded').length} discarded · ${rulesStep.assertions.filter((a) => a.status === 'no-template').length} need an LLM`,
+    `  LLM requests: ${rulesStep.llmRequests} (rule proposals: ${rulesStep.proposal.llmSource}) · spec drafts: ${specDir}`,
+    '  needs the lead: `pramaan review` — rules, matrix rows and assertions are proposed until you confirm them',
   ].join('\n');
-  return { runId, exitCode: 0, entities, operations: model.operations.map((o) => o.key), probe, ...(docs ? { docs } : {}), specDir, summary };
+  return {
+    runId,
+    exitCode: 0,
+    entities,
+    operations: model.operations.map((o) => o.key),
+    probe,
+    ...(docs ? { docs } : {}),
+    rules: rulesStep.proposal.rules,
+    newRules: rulesStep.proposal.added,
+    rejectedRules: rulesStep.proposal.rejected,
+    assertionOutcomes: rulesStep.assertions,
+    specDir,
+    summary,
+  };
 }

@@ -1,0 +1,229 @@
+# Balu's clarified attendance rules (spec §1): 7 confirmed, 5 open questions for the lead queue.
+# Confirmed rules have no assertion yet; Pramaan proposes one once the attendance operations are observed.
+schemaVersion: 1
+rules:
+  - id: R-001
+    title: Attendance round-off applies only when the gap is strictly less than 15 minutes; exactly 15 minutes is not rounded
+    kind: calculation
+    status: confirmed
+    confidence: 1
+    source: lead
+    entities:
+      - attendance
+    operations: []
+    evidence:
+      - id: E-aec7b503
+        kind: lead-note
+        ref: PRAMAAN_BUILD_SPEC.md#1-rule-1
+    criticality: 4
+    assertionIds: []
+    decision:
+      by: lead:balu
+      at: 2026-10-31T20:00:00+05:30
+      note: Clarified by Balu (spec §1); needs a proposed assertion
+    version: 1
+  - id: R-002
+    title: The grace-period deduction fires on the fourth late occurrence, not the third
+    kind: calculation
+    status: confirmed
+    confidence: 1
+    source: lead
+    entities:
+      - attendance
+    operations: []
+    evidence:
+      - id: E-74d0557c
+        kind: lead-note
+        ref: PRAMAAN_BUILD_SPEC.md#1-rule-2
+    criticality: 5
+    assertionIds: []
+    decision:
+      by: lead:balu
+      at: 2026-10-31T20:00:00+05:30
+      note: Clarified by Balu (spec §1); needs a proposed assertion
+    version: 1
+  - id: R-003
+    title: The elapsed attendance timer is computed from server timestamps, never from the client clock
+    kind: invariant
+    status: confirmed
+    confidence: 1
+    source: lead
+    entities:
+      - attendance
+    operations: []
+    evidence:
+      - id: E-93858a1b
+        kind: lead-note
+        ref: PRAMAAN_BUILD_SPEC.md#1-rule-3
+    criticality: 4
+    assertionIds: []
+    decision:
+      by: lead:balu
+      at: 2026-10-31T20:00:00+05:30
+      note: Clarified by Balu (spec §1); needs a proposed assertion
+    version: 1
+  - id: R-004
+    title: Approving a regularization creates a new summary log record and never overwrites the original punch log
+    kind: invariant
+    status: confirmed
+    confidence: 1
+    source: lead
+    entities:
+      - attendance
+    operations: []
+    evidence:
+      - id: E-f8111d32
+        kind: lead-note
+        ref: PRAMAAN_BUILD_SPEC.md#1-rule-4
+    criticality: 5
+    assertionIds: []
+    decision:
+      by: lead:balu
+      at: 2026-10-31T20:00:00+05:30
+      note: Clarified by Balu (spec §1); needs a proposed assertion
+    version: 1
+  - id: R-005
+    title: An attendance deduction and the matching leave-balance update happen together or not at all
+    kind: invariant
+    status: confirmed
+    confidence: 1
+    source: lead
+    entities:
+      - attendance
+    operations: []
+    evidence:
+      - id: E-48d82b84
+        kind: lead-note
+        ref: PRAMAAN_BUILD_SPEC.md#1-rule-5
+    criticality: 5
+    assertionIds: []
+    decision:
+      by: lead:balu
+      at: 2026-10-31T20:00:00+05:30
+      note: Clarified by Balu (spec §1); needs a proposed assertion
+    version: 1
+  - id: R-006
+    title: Past attendance records are never recalculated when shifts or policies change
+    kind: invariant
+    status: confirmed
+    confidence: 1
+    source: lead
+    entities:
+      - attendance
+    operations: []
+    evidence:
+      - id: E-ddec7e57
+        kind: lead-note
+        ref: PRAMAAN_BUILD_SPEC.md#1-rule-6
+    criticality: 5
+    assertionIds: []
+    decision:
+      by: lead:balu
+      at: 2026-10-31T20:00:00+05:30
+      note: Clarified by Balu (spec §1); needs a proposed assertion
+    version: 1
+  - id: R-007
+    title: Attendance policy resolves global → shift → department → employee type → employee-specific; employee-specific wins
+    kind: calculation
+    status: confirmed
+    confidence: 1
+    source: lead
+    entities:
+      - attendance
+    operations: []
+    evidence:
+      - id: E-52df9d2f
+        kind: lead-note
+        ref: PRAMAAN_BUILD_SPEC.md#1-rule-7
+    criticality: 5
+    assertionIds: []
+    decision:
+      by: lead:balu
+      at: 2026-10-31T20:00:00+05:30
+      note: Clarified by Balu (spec §1); needs a proposed assertion
+    version: 1
+  - id: R-008
+    title: Presence of exactly 60 minutes on the boundary is treated consistently by the attendance status rule
+    kind: calculation
+    status: proposed
+    confidence: 0.3
+    source: lead
+    entities:
+      - attendance
+    operations: []
+    evidence:
+      - id: E-9954295b
+        kind: lead-note
+        ref: PRAMAAN_BUILD_SPEC.md#1-rule-8
+    criticality: 4
+    assertionIds: []
+    openQuestion: Is a 60-minute presence counted as present or absent? Which side of the boundary is inclusive?
+    version: 1
+  - id: R-009
+    title: A late arrival of exactly 30 minutes is classified consistently against the grace threshold
+    kind: calculation
+    status: proposed
+    confidence: 0.3
+    source: lead
+    entities:
+      - attendance
+    operations: []
+    evidence:
+      - id: E-3f3b82e5
+        kind: lead-note
+        ref: PRAMAAN_BUILD_SPEC.md#1-rule-9
+    criticality: 4
+    assertionIds: []
+    openQuestion: Is exactly 30 minutes late inside the grace period or outside it?
+    version: 1
+  - id: R-010
+    title: Approving a regularization adjusts the late-arrival count consistently
+    kind: calculation
+    status: proposed
+    confidence: 0.3
+    source: lead
+    entities:
+      - attendance
+    operations: []
+    evidence:
+      - id: E-45de80b1
+        kind: lead-note
+        ref: PRAMAAN_BUILD_SPEC.md#1-rule-10
+    criticality: 4
+    assertionIds: []
+    openQuestion: Does an approved regularization roll back the late count for that day?
+    version: 1
+  - id: R-011
+    title: A day that is both a weekend and a holiday has one well-defined attendance status
+    kind: calculation
+    status: proposed
+    confidence: 0.3
+    source: lead
+    entities:
+      - attendance
+    operations: []
+    evidence:
+      - id: E-f05ce370
+        kind: lead-note
+        ref: PRAMAAN_BUILD_SPEC.md#1-rule-11
+    criticality: 4
+    assertionIds: []
+    openQuestion: When a holiday falls on a weekend, which status wins?
+    version: 1
+  - id: R-012
+    title: An admin can reclassify past attendance days only under a defined override policy
+    kind: calculation
+    status: proposed
+    confidence: 0.3
+    source: lead
+    entities:
+      - attendance
+    operations: []
+    evidence:
+      - id: E-056e1220
+        kind: lead-note
+        ref: PRAMAAN_BUILD_SPEC.md#1-rule-12
+    criticality: 4
+    assertionIds: []
+    openQuestion: May an admin override and reclassify past days, and is the original kept?
+    version: 1

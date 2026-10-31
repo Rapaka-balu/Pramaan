@@ -7,7 +7,8 @@
 | M2 — Crawler with HAR capture | **demo done**; HRMS staging crawl pending creds + OK | 2026-10-27 |
 | M3 — Living Spec inference | **demo done**; HRMS docs score pending staging | 2026-10-31 |
 | M4 — Authorization differential matrix | **demo done**; HRMS matrix pending staging | 2026-10-31 |
-| M5 — Rule proposer, seed rules, review queue v0 | next | |
+| M5 — Rule proposer, seed rules, review queue v0 | **demo done**; HRMS first review session pending | 2026-10-31 |
+| M6 — Compiler: the suite repo | next | |
 
 ## M0 — measured (2026-10-08)
 
@@ -76,3 +77,15 @@
 | Skipped cells | 6 (create operation `POST /api/leaves`, not replayed by design) |
 | HRMS matrix rows / skipped cells | **not run** — needs staging |
 | `npm run verify` | green: 26 unit files / 345 tests, 12 e2e tests |
+
+## M5 — measured (2026-10-31, demo, keyless — LLM proposals fall back to the domain pack)
+
+| Acceptance check | Result |
+| --- | --- |
+| ≥ 10 sensible proposed rules with valid evidence | **11** (domain pack): own-approval, cross-employee read, approval deducts, cancel refunds, half day = 0.5, end-before-start, days > 0, IST dates, DD/MM/YYYY, state machine, UI balance = API |
+| Rules citing unknown evidence | **0** accepted; rejection count reported per run (0 this run — no LLM output yet). Unit tests prove an invented id is dropped and logged |
+| ≥ 6 assertions dry-run successfully on `DEMO_BUGS=none` | **8 of 8** (A-001…A-007, A-010); 2 rules wait for an LLM (no template); records torn down, 0 orphans |
+| Review CLI decides 20 items (scripted) + ledger `lead.session` minutes | 20 decided (rules + matrix rows), 20 `*.decided` events, `lead.session` with measured minutes |
+| DSL runtime unit cases (§10.1 invalid + corrected A-012, JSONPath, expressions, refs, runner) | 73 cases; invalid A-012 → "assert[1]: expected a Check, got a Step — move balAfter to act" |
+| HRMS: Balu's first real review session (minutes, confirm/reject counts) | **not run** — needs the HRMS crawl/infer on staging first |
+| `npm run verify` | green: 28 unit files / 429 tests, 13 e2e tests |

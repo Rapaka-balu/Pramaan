@@ -149,3 +149,25 @@ stays keyless (D-010); with the key, run `npm run llm:smoke`, then record demo f
   record (§4.7). S1 for other-tenant/anonymous leaks, S2 otherwise.
 - **Demo app:** approvers get an "All leave requests" view (`/leaves?scope=all` → `GET /api/leaves?all=1`), the realistic
   screen through which `cross-tenant-list` becomes reachable; before it, no UI called that endpoint.
+
+## D-015 · 2026-10-31 · Rules, DSL and lead review (M5) choices
+- **Domain pack = deterministic fallback.** `domain-packs/in-hrms/rules.yaml` holds 12 templates with `requires`
+  capabilities; `src/spec/domain-pack.ts` binds them to the Living Spec (create/approve/cancel ops, days/half-day/date
+  fields, balance endpoint, second plain employee, UI facts) and builds 8 deterministic DSL assertion templates.
+  Assertions prefer the template over the LLM (no cost, reproducible); the frontier LLM writes assertions only for
+  rules without a template (IST dates, ₹/date formats, seed attendance rules) — keyless they wait (`need an LLM`).
+- **Rule proposals:** pack matches (confidence 0.7, `source: domain-pack`) + frontier LLM (`source: inferred`). LLM
+  output is an LLM-facing shape with evidence *ids*; ids are resolved against the digest, unknown ids drop the rule
+  (`llm.rejected-output`). Dedupe = Dice bigram similarity ≥ 0.85 against all existing rules (so rejected rules are
+  never re-proposed); max 40 new per run. Template provenance = the rule's `domain-pack` evidence ref (`…#<template>`).
+- **Assertion LLM shape:** bodies travel as JSON strings (`bodyJson`) and checks as loose objects; converted, then
+  validated by the full zod schema + static checks; an assertion that cannot run (aborted) is discarded.
+- **DSL runner:** API steps only (UI steps run in the compiled suite's flows, M6). `aborted` (could not run) is distinct
+  from `passed: false` (a check failed). Every write passes `decideOwnership` with the assertion's own creations as the
+  owned set; cleanup always runs; created records are also reported to the steward (dry-run teardown is the backstop).
+- **Seed rules:** `apps/hrms/seed-rules.yaml` — 7 confirmed (`source: lead`, `by: lead:balu`, evidence `lead-note`
+  → spec §1), 5 open questions (`proposed` + `openQuestion`). A seed whose id is taken is renumbered.
+- **Queue:** risk = criticality × (1 + recent change [0 until M16]) × (1 + oracle weakness [no assertion = 1]);
+  matrix rows criticality 4 (×1.25 for writes), findings S1..S4 → 5..2. Weekly budget from `lead.minutesPerWeek`
+  minus this ISO week's (Mon 00:00 IST) `lead.session` minutes. Checklist imports record *estimated* minutes and say so.
+- **Review ids:** rules/questions `R-xxx`, matrix rows `M:<operation>`, assertions `A-xxx`, findings `F-xxxx`.

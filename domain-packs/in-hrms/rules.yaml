@@ -1,0 +1,74 @@
+# Indian HRMS domain pack (§8 M5): rule templates matched to discovered entities by capability.
+# {entity} is replaced by the matched entity name. `requires` lists capabilities the Living Spec must show
+# (resolved in src/spec/domain-pack.ts); `assertion` names a deterministic DSL template, when one exists.
+schemaVersion: 1
+pack: in-hrms
+templates:
+  - id: no-self-approval
+    title: An employee cannot approve their own {entity} request
+    kind: workflow
+    criticality: 5
+    requires: [approve-op]
+    assertion: self-approval-denied
+  - id: no-cross-employee-read
+    title: An employee cannot read another employee's {entity}
+    kind: authz
+    criticality: 5
+    requires: [record-read, personal-entity]
+    assertion: cross-employee-read-denied
+  - id: approval-deducts
+    title: Approving a submitted {entity} deducts exactly the requested days from the balance
+    kind: calculation
+    criticality: 5
+    requires: [approve-op, days-field, balance-op]
+    assertion: approval-deducts
+  - id: cancel-refunds
+    title: Cancelling an approved {entity} refunds the deducted days to the balance
+    kind: calculation
+    criticality: 5
+    requires: [approve-op, cancel-after-approve, days-field, balance-op]
+    assertion: cancel-refunds
+  - id: half-day
+    title: A half-day {entity} counts as 0.5 days against the balance
+    kind: calculation
+    criticality: 4
+    requires: [approve-op, half-day-field, days-field, balance-op]
+    assertion: half-day-deducts-half
+  - id: end-before-start
+    title: A {entity} whose end date is before its start date is rejected
+    kind: validation
+    criticality: 4
+    requires: [date-range]
+    assertion: end-before-start-rejected
+  - id: days-positive
+    title: A {entity} must request more than 0 days
+    kind: validation
+    criticality: 4
+    requires: [days-field]
+    assertion: non-positive-days-rejected
+  - id: ist-dates
+    title: "{Entity} dates are evaluated in the Asia/Kolkata time zone"
+    kind: calculation
+    criticality: 3
+    requires: [date-field]
+  - id: inr-format
+    title: Currency amounts render as ₹ with Indian digit grouping (₹1,00,000)
+    kind: format
+    criticality: 2
+    requires: [currency-field]
+  - id: date-format
+    title: Dates render as DD/MM/YYYY in the user interface
+    kind: format
+    criticality: 2
+    requires: [ui-date]
+  - id: status-machine
+    title: A {entity} status only moves along its state machine (no approving twice)
+    kind: workflow
+    criticality: 4
+    requires: [state-machine, approve-op]
+    assertion: double-approve-rejected
+  - id: ui-balance
+    title: The balance shown in the user interface equals the balance returned by the API
+    kind: consistency
+    criticality: 4
+    requires: [balance-op, ui-balance]

@@ -6,6 +6,7 @@ import { stateRoot } from '../core/paths.js';
 import { runAuthz } from '../authz/run.js';
 import { runCrawl } from '../crawler/crawl.js';
 import { runOnboard } from '../onboarding/onboard.js';
+import { exportReview, importReview, inquirerPrompter, queueSummary, runInteractiveReview } from '../lead/review.js';
 import { runInfer } from '../spec/infer.js';
 import { formatDoctor, runDoctor } from './doctor.js';
 
@@ -83,6 +84,31 @@ program
     const res = await runAuthz({ appId: opts.app, stateRoot: stateRoot(), target: opts.target });
     console.log(res.summary);
     process.exitCode = res.exitCode;
+  });
+
+program
+  .command('review')
+  .description('the lead queue: rules, matrix rows, assertions, findings and questions (shows the queue by default)')
+  .requiredOption('--app <id>', 'app id under apps/')
+  .option('--interactive', 'decide items one at a time; your minutes are measured')
+  .option('--export', 'write review/REVIEW-<date>.md with checkboxes')
+  .option('--import <file>', 'apply a ticked REVIEW-<date>.md')
+  .option('--by <name>', 'who is deciding', 'balu')
+  .action(async (opts: { app: string; interactive?: boolean; export?: boolean; import?: string; by: string }) => {
+    const base = { appId: opts.app, stateRoot: stateRoot(), by: `lead:${opts.by}` };
+    if (opts.interactive) {
+      const r = await runInteractiveReview(base, inquirerPrompter);
+      console.log(`pramaan review — decided ${r.decided} item(s) in ${r.minutes} min (recorded as lead.session)`);
+    } else if (opts.export) {
+      const r = exportReview(base);
+      console.log(`pramaan review — ${r.items} item(s) written to ${r.path}
+  tick confirm/reject, then: pramaan review --app ${opts.app} --import "${r.path}"`);
+    } else if (opts.import) {
+      const r = importReview(base, opts.import);
+      console.log(`pramaan review — decided ${r.decided}, skipped ${r.skipped}${r.conflicts.length > 0 ? ` · both boxes ticked (skipped): ${r.conflicts.join(', ')}` : ''}`);
+    } else {
+      console.log(queueSummary(base));
+    }
   });
 
 program.parseAsync(process.argv).catch((err: unknown) => {
