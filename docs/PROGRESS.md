@@ -5,7 +5,8 @@
 | M0 — Scaffold, demo app, LLM client, guards | **done** (llm:smoke pending Balu's key) | 2026-10-08 |
 | M1 — Onboarding harness | **demo done**; HRMS staging run pending creds + OK | 2026-10-08 |
 | M2 — Crawler with HAR capture | **demo done**; HRMS staging crawl pending creds + OK | 2026-10-27 |
-| M3 — Living Spec inference | next — waiting for "continue" | |
+| M3 — Living Spec inference | **demo done**; HRMS docs score pending staging | 2026-10-31 |
+| M4 — Authorization differential matrix | next | |
 
 ## M0 — measured (2026-10-08)
 
@@ -50,3 +51,15 @@
 | HRMS staging crawl (state counts, 5 screenshot spot-checks) | **not run** — needs `.env` values and Balu's OK |
 | LLM requests | 0 (keyless mode, D-010) |
 | `npm run verify` | green: 23 unit files / 305 tests, 9 e2e tests |
+
+## M3 — measured (2026-10-31, demo, keyless)
+
+| Acceptance check | Result |
+| --- | --- |
+| Every leave/employee op the crawl exercised, correctly templated | 11 ops from 134 API calls: `GET/POST /api/leaves`, `GET /api/leaves/{id}`, `POST /api/leaves/{id}/approve|reject|cancel`, `GET /api/leaves/export.csv`, `GET /api/approvals`, `GET /api/employees`, `/api/leave-balance`, `/api/attendance`; no concrete ids left |
+| Leave state machine after lifecycle probe | field `status`, states approved/cancelled/draft/rejected/submitted; **submitted→approved** (admin), **approved→cancelled** (employee), submitted→rejected, submitted→cancelled all `observed: true` |
+| Probe safety | only its own records mutated (server log vs ledger); 0 orphans; balances back to seed |
+| Unit tests: path normalization, slug detection, schema merge with conflicting types, required fields | 25 cases (spec-infer, spec-model) |
+| HRMS route precision ≥ 90% vs /apidocs | **not run** — needs staging (`score-vs-docs` is built and unit-tested) |
+| LLM requests | 0 (entity names from path roots) |
+| `npm run verify` | green: 25 unit files / 330 tests, 10 e2e tests |

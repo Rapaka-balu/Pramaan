@@ -101,3 +101,28 @@ M2 consequence: no LLM form data and no frontier rerank — both use the determi
 - **Teardown ops** are learned from the crawl: a 2xx `DELETE …/{id}` or `POST …/{id}/cancel|withdraw|delete|remove`
   on an owned record. A teardown call answered 409/410 means the record is already terminal → `retired`.
 - **Demo app:** approval rows gained a "View" link (realistic, and lets second-tenant approvers reach `/leaves/{id}`).
+
+## D-012 · 2026-10-31 · Anthropic API key (supersedes the free-tier plan)
+Balu will buy an Anthropic API key. The LLM layer stays on the existing `@anthropic-ai/sdk` client (D-002/D-003,
+models via `PRAMAAN_MODEL_*`, USD budgets in app.yaml). Spec v2's free-tier section (§2.4/§2.5: `openai` package,
+Groq/Gemini/OpenRouter chains, quotas, privacy routing) is **not** implemented. Until the key is in `.env`, Pramaan
+stays keyless (D-010); with the key, run `npm run llm:smoke`, then record demo fixtures (show estimated cost first).
+
+## D-013 · 2026-10-31 · Living Spec inference (M3) choices
+- **Where:** drafts go to `workspace/<app>/spec/` (openapi.observed.yaml, entities.yaml, docs-score.json, replay/).
+  M6 `compile` copies the reviewed versions into the suite repo's `spec/`. The OpenAPI holds schemas only — no
+  sample values — so nothing personal reaches the suite repo; raw samples stay in the gitignored workspace.
+- **Slug params:** ≥ 3 distinct values at a position *and* the parent path observed as a collection *and* identifier-like
+  values (a digit, or ≥ 5 values), never file names. Without these, `/api/leaves|employees|attendance` collapsed to
+  `/api/{id}`. Several params: the last is `{id}`, earlier ones `{<entity>Id}`.
+- **Entities:** path root after the API prefix; a group whose record fields match another's at Jaccard ≥ 0.8 merges
+  into the larger (e.g. `/api/approvals` → leave). Names are singular roots (keyless; the LLM may rename later).
+- **State machines:** status-like string field with ≤ 8 values. Observed transitions come from per-record sequences
+  ordered by timestamp across roles. UI hints (a crawl state showing exactly one status + its record buttons) add
+  `observed:false` hypotheses, including conventional `POST <root>/{id}/<verb>` ops the crawler was denied.
+  `initial` (states right after create) is an additive field.
+- **Lifecycle probe:** tries every known record op from every reachable state (not only UI hints), creating a fresh
+  record per attempt from a crawl recipe (free text re-tagged), driving it along observed transitions, trying actors
+  (UI roles → creator → others, max 4). 404/405 for the owner = the op does not exist. Every write passes
+  `decideOwnership` first; all records are torn down. Replay evidence: `spec/replay/lifecycle-<runId>.json`.
+- **Login:** session reuse means crawl HARs rarely contain the login call; it is excluded from entities anyway.

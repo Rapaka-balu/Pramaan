@@ -7,6 +7,12 @@ Open asks that block or degrade work. Newest first. Tick when resolved.
 - [ ] **HRMS `.env` values:** `HRMS_TENANT_PRIMARY` (TEST), `HRMS_EMPLOYEE_EMAIL/PASSWORD`, `HRMS_ADMIN_EMAIL/PASSWORD`. Copy `.env.example` → `.env` (gitignored). `npx tsx src/cli/index.ts doctor --app hrms` lists exactly what is still missing.
 - [ ] **Approve the HRMS safety lists** in `apps/hrms/app.yaml` (`denyActionPatterns`, `requiresApprovalPatterns`, `forbiddenHostPatterns`, `allowedOrigins`). They are copied from spec §8 M0 item 6.
 
+## LLM
+- [ ] **ANTHROPIC_API_KEY** in `.env` once bought (D-012). Then I run `npm run llm:smoke` (a few cents) and, with your OK on the estimate, record the demo LLM fixtures.
+
+## M3
+- [ ] HRMS docs score needs the staging run: `pramaan infer --app hrms --target staging` after the crawl.
+
 ## M2
 - [ ] Permission for the first staging crawl (`pramaan crawl --app hrms --target staging`), primary tenant, with a time cap. It submits only allow-listed forms and tags free text `PRM-<runId>-`.
 - [ ] Spot-check 5 HRMS screenshots after that crawl (spec acceptance).
